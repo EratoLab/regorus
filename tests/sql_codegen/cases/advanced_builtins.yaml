@@ -1,0 +1,328 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# SQL code generation tests for advanced builtin functions
+
+cases:
+  # ========================
+  # ARRAY FUNCTIONS
+  # ========================
+  - note: array-concat-function
+    rego: |
+      package test
+
+      combined_arrays contains result if {
+          some pair in data.array_pairs
+          result := {
+              "name": pair.name,
+              "arr1": pair.arr1,
+              "arr2": pair.arr2,
+              "combined": array.concat(pair.arr1, pair.arr2)
+          }
+      }
+    expected_sql: |
+      SELECT name, arr1, arr2, arr1 || arr2 AS combined
+      FROM array_pairs
+
+  - note: array-reverse-function
+    rego: |
+      package test
+
+      reversed_items contains result if {
+          some list in data.lists
+          result := {
+              "name": list.name,
+              "items": list.items,
+              "reversed": array.reverse(list.items)
+          }
+      }
+    expected_sql: |
+      SELECT name, items, array_reverse(items) AS reversed
+      FROM lists
+
+  - note: array-slice-function
+    rego: |
+      package test
+
+      sliced_data contains result if {
+          some arr in data.arrays
+          result := {
+              "name": arr.name,
+              "data": arr.data,
+              "slice": array.slice(arr.data, 1, 5)
+          }
+      }
+    expected_sql: |
+      SELECT name, data, ARRAY_SLICE(data, 1, 4) AS slice
+      FROM arrays
+
+  - note: array-length-function
+    rego: |
+      package test
+
+      valid_arrays contains result if {
+          some arr in data.arrays
+          array.length(arr.items) > 0
+          result := {
+              "name": arr.name,
+              "items": arr.items,
+              "length": array.length(arr.items)
+          }
+      }
+    expected_sql: |
+      SELECT name, items, ARRAY_LENGTH(items) AS length
+      FROM arrays
+      WHERE ARRAY_LENGTH(items) > 0
+
+  - note: sort-function
+    rego: |
+      package test
+
+      sorted_lists contains result if {
+          some list in data.lists
+          result := {
+              "name": list.name,
+              "values": list.values,
+              "sorted": sort(list.values)
+          }
+      }
+    expected_sql: |
+      SELECT name, values, ARRAY_SORT(values) AS sorted
+      FROM lists
+
+  # ========================
+  # STRING FUNCTIONS
+  # ========================
+  - note: strings-reverse-function
+    rego: |
+      package test
+
+      palindrome_check contains result if {
+          some text in data.texts
+          strings.reverse(text.value) == text.value
+          result := {
+              "name": text.name,
+              "value": text.value,
+              "reversed": strings.reverse(text.value)
+          }
+      }
+    expected_sql: |
+      SELECT name, value, REVERSE(value) AS reversed
+      FROM texts
+      WHERE REVERSE(value) = value
+
+  - note: trim-functions
+    rego: |
+      package test
+
+      cleaned_strings contains result if {
+          some str in data.strings
+          trim_left(str.value, " ") != str.value
+          result := {
+              "name": str.name,
+              "value": str.value,
+              "trimmed": trim_left(str.value, " ")
+          }
+      }
+    expected_sql: |
+      SELECT name, value, LTRIM(value) AS trimmed
+      FROM strings
+      WHERE LTRIM(value) != value
+
+  - note: regex-match-function
+    rego: |
+      package test
+
+      email_patterns contains result if {
+          some email in data.emails
+          regex.match("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", email.address)
+          result := {
+              "name": email.name,
+              "address": email.address,
+              "is_valid": regex.match("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", email.address)
+          }
+      }
+    expected_sql: |
+      SELECT name, address, address ~ '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}' AS is_valid
+      FROM emails
+      WHERE address ~ '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+
+  # ========================
+  # TYPE CONVERSION FUNCTIONS
+  # ========================
+  - note: to-number-function
+    rego: |
+      package test
+
+      numeric_values contains result if {
+          some val in data.values
+          to_number(val.string_value) > 100
+          result := {
+              "name": val.name,
+              "string_value": val.string_value,
+              "numeric_value": to_number(val.string_value)
+          }
+      }
+    expected_sql: |
+      SELECT name, string_value, CAST(string_value AS NUMERIC) AS numeric_value
+      FROM values
+      WHERE CAST(string_value AS NUMERIC) > 100
+
+  - note: format-int-function
+    rego: |
+      package test
+
+      formatted_numbers contains result if {
+          some num in data.numbers
+          format_int(num.value, 10)
+          result := {
+              "name": num.name,
+              "value": num.value,
+              "formatted": format_int(num.value, 10)
+          }
+      }
+    expected_sql: |
+      SELECT name, value, CAST(value AS VARCHAR) AS formatted
+      FROM numbers
+      WHERE CAST(value AS VARCHAR) IS NOT NULL
+
+  # ========================
+  # TYPE CHECKING FUNCTIONS
+  # ========================
+  - note: is-null-function
+    rego: |
+      package test
+
+      null_fields contains result if {
+          some field in data.fields
+          is_null(field.optional_value)
+          result := {
+              "name": field.name,
+              "optional_value": field.optional_value,
+              "is_null": is_null(field.optional_value)
+          }
+      }
+    expected_sql: |
+      SELECT name, optional_value, optional_value IS NULL AS is_null
+      FROM fields
+      WHERE optional_value IS NULL
+
+  # ========================
+  # ENCODING FUNCTIONS
+  # ========================
+  - note: base64-encode-function
+    rego: |
+      package test
+
+      encoded_data contains result if {
+          some data in data.raw_data
+          base64.encode(data.content)
+          result := {
+              "name": data.name,
+              "content": data.content,
+              "encoded": base64.encode(data.content)
+          }
+      }
+    expected_sql: |
+      SELECT name, content, ENCODE(content, 'BASE64') AS encoded
+      FROM raw_data
+      WHERE ENCODE(content, 'BASE64') IS NOT NULL
+
+  - note: base64-decode-function
+    rego: |
+      package test
+
+      decoded_data contains result if {
+          some data in data.encoded_data
+          base64.decode(data.encoded_content)
+          result := {
+              "name": data.name,
+              "encoded_content": data.encoded_content,
+              "decoded": base64.decode(data.encoded_content)
+          }
+      }
+    expected_sql: |
+      SELECT name, encoded_content, DECODE(encoded_content, 'BASE64') AS decoded
+      FROM encoded_data
+      WHERE DECODE(encoded_content, 'BASE64') IS NOT NULL
+
+  # ========================
+  # MATH FUNCTIONS
+  # ========================
+  - note: mathematical-pow-function
+    rego: |
+      package test
+
+      power_calculations contains result if {
+          some calc in data.calculations
+          calc.base >= 0
+          result := {
+              "base": calc.base,
+              "exponent": calc.exponent,
+              "power": round(pow(calc.base, calc.exponent))
+          }
+      }
+    expected_sql: |
+      SELECT base, exponent, ROUND(POWER(base, exponent)) AS power
+      FROM calculations
+      WHERE base >= 0
+
+  - note: mathematical-sqrt-function
+    rego: |
+      package test
+
+      square_roots contains result if {
+          some num in data.numbers
+          num.value >= 0
+          result := {
+              "value": num.value,
+              "sqrt": round(sqrt(num.value), 2)
+          }
+      }
+    expected_sql: |
+      SELECT value, ROUND(SQRT(value), 2) AS sqrt
+      FROM numbers
+      WHERE value >= 0
+
+  - note: trigonometric-functions
+    rego: |
+      package test
+
+      trig_calculations contains result if {
+          some angle in data.angles
+          sin(angle.radians) > 0.5
+          result := {
+              "name": angle.name,
+              "radians": angle.radians,
+              "sin_value": sin(angle.radians)
+          }
+      }
+    expected_sql: |
+      SELECT name, radians, SIN(radians) AS sin_value
+      FROM angles
+      WHERE SIN(radians) > 0.5
+
+  # ========================
+  # COMPLEX COMBINATIONS
+  # ========================
+  - note: complex-builtin-combination
+    rego: |
+      package test
+
+      complex_analysis contains result if {
+          some user in data.users
+          count(user.tags) > 0
+          user.age >= 18
+          result := {
+              "name": user.name,
+              "age": user.age,
+              "tag_count": count(user.tags),
+              "first_tag": user.tags[0],
+              "name_length": count(user.name),
+              "is_adult": user.age >= 18
+          }
+      }
+    expected_sql: |
+      SELECT name, age, ARRAY_LENGTH(tags) AS tag_count, tags[1] AS first_tag, LENGTH(name) AS name_length, age >= 18 AS is_adult
+      FROM users
+      WHERE ARRAY_LENGTH(tags) > 0 AND age >= 18

@@ -1,0 +1,154 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# SQL code generation tests for complex expressions and edge cases
+
+cases:
+  - note: multiple-conditions-with-operators
+    rego: |
+      package test
+
+      qualified_employees contains result if {
+          some user in data.employees
+          user.role in {"admin", "manager"}
+          user.experience_years >= 5
+          user.department != "contractor"
+          user.salary > 50000
+          user.clearance_level == "secret"
+          result := {
+              "name": user.name,
+              "role": user.role,
+              "experience_years": user.experience_years,
+              "department": user.department,
+              "salary": user.salary,
+              "clearance_level": user.clearance_level
+          }
+      }
+    expected_sql: |
+      SELECT name, role, experience_years, department, salary, clearance_level
+      FROM employees
+      WHERE role IN ('admin', 'manager') AND experience_years >= 5 AND department != 'contractor' AND salary > 50000 AND clearance_level = 'secret'
+
+  - note: nested-field-access
+    rego: |
+      package test
+
+      configured_users contains result if {
+          some user in data.users
+          user.profile.settings.notifications == true
+          user.account.status.active == true
+          result := {
+              "name": user.name,
+              "profile": user.profile,
+              "account": user.account
+          }
+      }
+    expected_sql: |
+      SELECT name, profile, account
+      FROM users
+      WHERE profile->'settings'->>'notifications' = 'true' AND account->'status'->>'active' = 'true'
+
+  - note: comparison-operators
+    rego: |
+      package test
+
+      filtered_events contains result if {
+          some event in data.events
+          event.timestamp >= start_time
+          event.timestamp <= end_time
+          event.severity_level < 5
+          event.retry_count != 0
+          result := {
+              "id": event.id,
+              "timestamp": event.timestamp,
+              "severity_level": event.severity_level,
+              "retry_count": event.retry_count
+          }
+      }
+    expected_sql: |
+      SELECT id, timestamp, severity_level, retry_count
+      FROM events
+      WHERE timestamp >= start_time AND timestamp <= end_time AND severity_level < 5 AND retry_count != 0
+
+  - note: string-operations
+    rego: |
+      package test
+
+      target_users contains result if {
+          some user in data.users
+          user.email == "admin@company.com"
+          user.username != "guest"
+          result := {
+              "name": user.name,
+              "email": user.email,
+              "username": user.username
+          }
+      }
+    expected_sql: |
+      SELECT name, email, username
+      FROM users
+      WHERE email = 'admin@company.com' AND username != 'guest'
+
+  - note: rule-with-complex-name
+    rego: |
+      package authorization.rules
+
+      privileged_users contains result if {
+          some user in data.users
+          user.role == "admin"
+          user.mfa_enabled == true
+          result := {
+              "name": user.name,
+              "role": user.role,
+              "mfa_enabled": user.mfa_enabled
+          }
+      }
+    expected_sql: |
+      SELECT name, role, mfa_enabled
+      FROM users
+      WHERE role = 'admin' AND mfa_enabled = TRUE
+
+  - note: boolean-logic-combinations
+    rego: |
+      package test
+
+      active_users contains result if {
+          some user in data.users
+          user.status == "active"
+          user.last_login >= cutoff_date
+          user.permissions.read == true
+          user.permissions.write == true
+          result := {
+              "username": user.username,
+              "status": user.status,
+              "last_login": user.last_login,
+              "permissions": user.permissions
+          }
+      }
+    expected_sql: |
+      SELECT username, status, last_login, permissions
+      FROM users
+      WHERE status = 'active' AND last_login >= cutoff_date AND permissions->>'read' = 'true' AND permissions->>'write' = 'true'
+
+  - note: numeric-ranges-and-calculations
+    rego: |
+      package test
+
+      high_value_transactions contains result if {
+          some txn in data.transactions
+          txn.amount >= 1000
+          txn.amount <= 50000
+          txn.fee_percentage < 5
+          txn.status == "completed"
+          result := {
+              "transaction_id": txn.id,
+              "amount": txn.amount,
+              "fee_percentage": txn.fee_percentage,
+              "fee_amount": txn.amount * txn.fee_percentage / 100,
+              "net_amount": txn.amount - (txn.amount * txn.fee_percentage / 100)
+          }
+      }
+    expected_sql: |
+      SELECT id AS transaction_id, amount, fee_percentage, amount * fee_percentage / 100 AS fee_amount, amount - amount * fee_percentage / 100 AS net_amount
+      FROM transactions
+      WHERE amount >= 1000 AND amount <= 50000 AND fee_percentage < 5 AND status = 'completed'

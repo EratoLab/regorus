@@ -129,6 +129,8 @@ mod interpreter;
 mod kql_codegen;
 mod kql_ir;
 mod kql_translator;
+mod sql_codegen;
+mod sql_ir;
 
 pub mod languages {
     #[cfg(feature = "azure_policy")]
@@ -617,6 +619,8 @@ pub mod unstable {
     pub use crate::lexer::*;
     pub use crate::parser::*;
     pub use crate::rego_to_kql_ir::*;
+    pub use crate::sql_codegen::*;
+    pub use crate::sql_ir::*;
 }
 
 #[cfg(test)]

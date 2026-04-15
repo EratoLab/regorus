@@ -1,0 +1,302 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# SQL code generation tests for arithmetic operations and expressions
+
+cases:
+  # ========================
+  # BASIC ARITHMETIC OPERATORS
+  # ========================
+  - note: addition-operator
+    rego: |
+      package test
+
+      calculations contains result if {
+          some num in data.numbers
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "sum": num.a + num.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, a + b AS sum
+      FROM numbers
+
+  - note: subtraction-operator
+    rego: |
+      package test
+
+      calculations contains result if {
+          some num in data.numbers
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "difference": num.a - num.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, a - b AS difference
+      FROM numbers
+
+  - note: multiplication-operator
+    rego: |
+      package test
+
+      calculations contains result if {
+          some num in data.numbers
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "product": num.a * num.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, a * b AS product
+      FROM numbers
+
+  - note: division-operator
+    rego: |
+      package test
+
+      calculations contains result if {
+          some num in data.numbers
+          num.b != 0
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "quotient": num.a / num.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, a / b AS quotient
+      FROM numbers
+      WHERE b != 0
+
+  - note: modulo-operator
+    rego: |
+      package test
+
+      calculations contains result if {
+          some num in data.numbers
+          num.b != 0
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "remainder": num.a % num.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, a % b AS remainder
+      FROM numbers
+      WHERE b != 0
+
+  # ========================
+  # ARITHMETIC WITH FILTERS
+  # ========================
+  - note: addition-with-filter
+    rego: |
+      package test
+
+      valid_sums contains result if {
+          some num in data.numbers
+          num.a + num.b > 50
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "sum": num.a + num.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, a + b AS sum
+      FROM numbers
+      WHERE a + b > 50
+
+  - note: multiplication-with-filter
+    rego: |
+      package test
+
+      large_products contains result if {
+          some num in data.numbers
+          num.a * num.b >= 100
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "product": num.a * num.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, a * b AS product
+      FROM numbers
+      WHERE a * b >= 100
+
+  # ========================
+  # COMPLEX ARITHMETIC EXPRESSIONS
+  # ========================
+  - note: complex-arithmetic-expression
+    rego: |
+      package test
+
+      calculations contains result if {
+          some record in data.financial
+          result := {
+              "principal": record.principal,
+              "rate": record.rate,
+              "time": record.time,
+              "compound_interest": record.principal * (1 + record.rate) * record.time - record.principal
+          }
+      }
+    expected_sql: |
+      SELECT principal, rate, time, principal * (1 + rate) * time - principal AS compound_interest
+      FROM financial
+
+  - note: nested-arithmetic-operations
+    rego: |
+      package test
+
+      calculations contains result if {
+          some shape in data.geometry
+          result := {
+              "length": shape.length,
+              "width": shape.width,
+              "height": shape.height,
+              "volume": shape.length * shape.width * shape.height,
+              "surface_area": 2 * (shape.length * shape.width + shape.width * shape.height + shape.height * shape.length)
+          }
+      }
+    expected_sql: |
+      SELECT length, width, height, length * width * height AS volume, 2 * (length * width + width * height + height * length) AS surface_area
+      FROM geometry
+
+  # ========================
+  # ARITHMETIC WITH CONSTANTS
+  # ========================
+  - note: arithmetic-with-constants
+    rego: |
+      package test
+
+      tax_calculations contains result if {
+          some sale in data.sales
+          result := {
+              "item": sale.item,
+              "price": sale.price,
+              "tax": sale.price * 0.08,
+              "total": sale.price + (sale.price * 0.08),
+              "discount": sale.price * 0.1,
+              "final_price": sale.price + (sale.price * 0.08) - (sale.price * 0.1)
+          }
+      }
+    expected_sql: |
+      SELECT item, price, price * 0.08 AS tax, price + price * 0.08 AS total, price * 0.1 AS discount, price + price * 0.08 - price * 0.1 AS final_price
+      FROM sales
+
+  # ========================
+  # NEGATIVE NUMBERS AND UNARY OPERATIONS
+  # ========================
+  - note: negative-numbers
+    rego: |
+      package test
+
+      temperature_conversions contains result if {
+          some temp in data.temperatures
+          result := {
+              "celsius": temp.celsius,
+              "fahrenheit": temp.celsius * 9 / 5 + 32,
+              "kelvin": temp.celsius + 273.15,
+              "negative_celsius": -temp.celsius
+          }
+      }
+    expected_sql: |
+      SELECT celsius, celsius * 9 / 5 + 32 AS fahrenheit, celsius + 273.15 AS kelvin, -celsius AS negative_celsius
+      FROM temperatures
+
+  # ========================
+  # ARITHMETIC IN CONDITIONS
+  # ========================
+  - note: arithmetic-conditions-multiple
+    rego: |
+      package test
+
+      valid_ranges contains result if {
+          some measurement in data.measurements
+          measurement.value1 + measurement.value2 > 100
+          measurement.value1 * measurement.value2 < 10000
+          measurement.value1 - measurement.value2 >= 0
+          result := {
+              "value1": measurement.value1,
+              "value2": measurement.value2,
+              "sum": measurement.value1 + measurement.value2,
+              "product": measurement.value1 * measurement.value2,
+              "difference": measurement.value1 - measurement.value2
+          }
+      }
+    expected_sql: |
+      SELECT value1, value2, value1 + value2 AS sum, value1 * value2 AS product, value1 - value2 AS difference
+      FROM measurements
+      WHERE value1 + value2 > 100 AND value1 * value2 < 10000 AND value1 - value2 >= 0
+
+  # ========================
+  # FLOATING POINT ARITHMETIC
+  # ========================
+  - note: floating-point-precision
+    rego: |
+      package test
+
+      precise_calculations contains result if {
+          some finance in data.financial_data
+          result := {
+              "amount": finance.amount,
+              "rate": finance.rate,
+              "years": finance.years,
+              "monthly_rate": finance.rate / 12,
+              "monthly_payment": (finance.amount * (finance.rate / 12)) / (1 - (1 + finance.rate / 12))
+          }
+      }
+    expected_sql: |
+      SELECT amount, rate, years, rate / 12 AS monthly_rate, amount * (rate / 12) / (1 - (1 + rate / 12)) AS monthly_payment
+      FROM financial_data
+
+  # ========================
+  # ARITHMETIC WITH MIXED TYPES
+  # ========================
+  - note: mixed-type-arithmetic
+    rego: |
+      package test
+
+      conversions contains result if {
+          some number in data.mixed_numbers
+          result := {
+              "int_value": number.int_value,
+              "float_value": number.float_value,
+              "mixed_sum": number.int_value + number.float_value,
+              "mixed_product": number.int_value * number.float_value,
+              "percentage": number.int_value / number.float_value * 100
+          }
+      }
+    expected_sql: |
+      SELECT int_value, float_value, int_value + float_value AS mixed_sum, int_value * float_value AS mixed_product, int_value / float_value * 100 AS percentage
+      FROM mixed_numbers
+
+  # ========================
+  # OPERATOR PRECEDENCE VERIFICATION
+  # ========================
+  - note: operator-precedence
+    rego: |
+      package test
+
+      precedence_tests contains result if {
+          some value in data.test_values
+          result := {
+              "a": value.a,
+              "b": value.b,
+              "c": value.c,
+              "add_mult": value.a + value.b * value.c,
+              "mult_add": (value.a + value.b) * value.c,
+              "div_sub": value.a / value.b - value.c,
+              "sub_div": value.a - value.b / value.c,
+              "complex": value.a + value.b * value.c - value.a / value.b
+          }
+      }
+    expected_sql: |
+      SELECT a, b, c, a + b * c AS add_mult, (a + b) * c AS mult_add, a / b - c AS div_sub, a - b / c AS sub_div, a + b * c - a / b AS complex
+      FROM test_values

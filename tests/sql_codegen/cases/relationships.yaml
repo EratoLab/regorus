@@ -1,0 +1,51 @@
+# Complex Relationship Pattern Tests
+
+cases:
+  - note: "vm-dependency-health-lookup"
+    pretty_print: true
+    rego: |
+      package test
+
+      # Complex relationship query: VM -> Dependencies -> SQLServer -> ServiceGroup -> Health
+      result contains output if {
+        some vm in data.Resources
+        vm.type == "virtualMachine"
+
+        # Find dependencies of this VM
+        some dep1 in data.Dependencies
+        dep1.source_id == vm.id
+        dep1.type == "DependencyOf"
+
+        # Find the target SQLServer
+        some sql in data.Resources
+        sql.type == "SQLServer"
+        sql.id == dep1.target_id
+
+        # Find service group dependencies
+        some dep2 in data.Dependencies
+        dep2.source_id == sql.id
+        dep2.type == "ServiceGroupMember"
+
+        # Find health information
+        some health in data.HealthResources
+        health.service_group_id == dep2.target_id
+        health.health_id != null
+
+        # Create output object
+        output := {
+          "vm_id": vm.id,
+          "health_id": health.health_id
+        }
+      }
+    expected_sql: |
+      SELECT vm.id AS vm_id, h.health_id
+      FROM Resources vm
+      INNER JOIN Dependencies dep1 ON vm.id = dep1.source_id
+      INNER JOIN Resources sql ON dep1.target_id = sql.id
+      INNER JOIN Dependencies dep2 ON sql.id = dep2.source_id
+      INNER JOIN HealthResources h ON dep2.target_id = h.service_group_id
+      WHERE vm.type = 'virtualMachine'
+        AND dep1.type = 'DependencyOf'
+        AND sql.type = 'SQLServer'
+        AND dep2.type = 'ServiceGroupMember'
+        AND h.health_id IS NOT NULL

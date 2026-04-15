@@ -11,6 +11,7 @@ mod engine;
 mod kql_codegen;
 mod lexer;
 mod parser;
+mod sql_codegen;
 mod value;
 
 #[cfg(feature = "azure_policy")]

@@ -1,0 +1,167 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Join functionality tests for multi-table relationships
+
+cases:
+  - note: simple-two-table-join
+    rego: |
+      package test
+
+      # Simple join: Users -> Roles
+      user_roles contains result if {
+        some user in data.Users
+        some role in data.Roles
+        user.role_id == role.id
+        t := role.age + 10
+        result := {
+          "final_user_name": user.name,
+          "role_name": role.name,
+          "age": user.age,
+          "rage": t
+        }
+      }
+    expected_sql: |
+      SELECT u.name AS final_user_name, r.name AS role_name, u.age, r.age + 10 AS rage
+      FROM Users u
+      INNER JOIN Roles r ON u.role_id = r.id
+
+  - note: three-table-join-chain
+    rego: |
+      package test
+
+      # Three table join: Users -> Departments -> Companies
+      user_companies contains result if {
+        some user in data.Users
+        some dept in data.Departments
+        some company in data.Companies
+        user.dept_id == dept.id
+        dept.company_id == company.id
+
+        result := {
+          "user_name": user.name,
+          "department": dept.name,
+          "company": company.name
+        }
+      }
+    expected_sql: |
+      SELECT u.name AS user_name, d.name AS department, c.name AS company
+      FROM Users u
+      INNER JOIN Departments d ON u.dept_id = d.id
+      INNER JOIN Companies c ON d.company_id = c.id
+
+  - note: join-with-filters
+    rego: |
+      package test
+
+      # Join with filters on both tables
+      active_user_permissions contains result if {
+        some user in data.Users
+        user.active == true
+        some permission in data.Permissions
+        permission.enabled == true
+        user.id == permission.user_id
+
+        result := {
+          "user_name": user.name,
+          "permission": permission.name
+        }
+      }
+    expected_sql: |
+      SELECT u.name AS user_name, p.name AS permission
+      FROM Users u
+      INNER JOIN Permissions p ON u.id = p.user_id
+      WHERE u.active = TRUE AND p.enabled = TRUE
+
+  - note: self-join-pattern
+    rego: |
+      package test
+
+      # Self-join: Employees and their managers
+      employee_managers contains result if {
+        some employee in data.Employees
+        some manager in data.Employees
+        employee.manager_id == manager.id
+        employee.id != manager.id  # Avoid self-reference
+
+        result := {
+          "employee_name": employee.name,
+          "manager_name": manager.name
+        }
+      }
+    expected_sql: |
+      SELECT e.name AS employee_name, m.name AS manager_name
+      FROM Employees e
+      INNER JOIN Employees m ON e.manager_id = m.id
+      WHERE e.id != m.id
+
+  - note: join-with-null-handling
+    rego: |
+      package test
+
+      # Join with null checks
+      valid_assignments contains result if {
+        some user in data.Users
+        some task in data.Tasks
+        user.id == task.assigned_user_id
+        task.assigned_user_id != null
+
+        result := {
+          "user_name": user.name,
+          "task_title": task.title
+        }
+      }
+    expected_sql: |
+      SELECT u.name AS user_name, t.title AS task_title
+      FROM Users u
+      INNER JOIN Tasks t ON u.id = t.assigned_user_id
+      WHERE t.assigned_user_id IS NOT NULL
+
+  - note: complex-four-table-enterprise-access-control
+    rego: |
+      package enterprise_access
+
+      import rego.v1
+
+      authorized_actions contains result if {
+          some user in data.users
+          some role_assignment in data.user_roles
+          some role in data.roles
+          some permission in data.role_permissions
+
+          # Join conditions
+          role_assignment.user_id == user.id
+          role_assignment.role_id == role.id
+          permission.role_id == role.id
+
+          # Business logic filters
+          user.status == "active"
+          user.department in {"engineering", "security", "finance"}
+          role_assignment.expires_at > "2024-08-28T00:00:00Z"
+          role.is_enabled == true
+          permission.resource_type in {"database", "api", "admin_panel"}
+
+          # Complex computed conditions
+          contains(lower(user.email), "@company.com")
+          startswith(permission.action, "read_")
+          abs(user.last_login_days_ago) <= 30
+
+          result := {
+              "user_id": user.id,
+              "user_name": user.name,
+              "user_email": user.email,
+              "department": user.department,
+              "role_name": role.name,
+              "permission_resource": permission.resource_type,
+              "permission_action": permission.action,
+              "assignment_expires": role_assignment.expires_at,
+              "computed_risk_score": user.last_login_days_ago * 0.1 + role.privilege_level * 2.0
+          }
+      }
+    expected_sql: |
+      SELECT u.id AS user_id, u.name AS user_name, u.email AS user_email, u.department, r.name AS role_name, p.resource_type AS permission_resource, p.action AS permission_action, ra.expires_at AS assignment_expires, u.last_login_days_ago * 0.1 + r.privilege_level * 2.0 AS computed_risk_score
+      FROM users u
+      INNER JOIN user_roles ra ON u.id = ra.user_id
+      INNER JOIN roles r ON ra.role_id = r.id
+      INNER JOIN role_permissions p ON r.id = p.role_id
+      WHERE u.status = 'active' AND u.department IN ('engineering', 'security', 'finance') AND ra.expires_at > '2024-08-28T00:00:00Z' AND r.is_enabled = TRUE AND p.resource_type IN ('database', 'api', 'admin_panel') AND LOWER(u.email) LIKE '%@company.com%' AND p.action LIKE 'read_%' AND ABS(u.last_login_days_ago) <= 30
