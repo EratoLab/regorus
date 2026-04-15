@@ -608,7 +608,6 @@ pub mod coverage {
 }
 
 /// Items in `unstable` are likely to change.
-#[doc(hidden)]
 pub mod unstable {
     pub use crate::ast::*;
     pub use crate::builtins::*;
