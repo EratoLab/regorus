@@ -64,7 +64,11 @@ impl SqlCodeGenerator {
                 .enumerate()
                 .map(|(i, cte)| {
                     let cte_sql = if self.pretty_print {
-                        format!("{} AS (\n{}\n)", cte.name, self.generate_subquery_pretty(&cte.query))
+                        format!(
+                            "{} AS (\n{}\n)",
+                            cte.name,
+                            self.generate_subquery_pretty(&cte.query)
+                        )
                     } else {
                         format!("{} AS ({})", cte.name, self.generate(&cte.query))
                     };
@@ -87,7 +91,10 @@ impl SqlCodeGenerator {
         sql.push_str("SELECT ");
 
         // Handle DISTINCT if present
-        let distinct = query.pipeline.iter().any(|op| matches!(*op, SqlOperation::Distinct(_)));
+        let distinct = query
+            .pipeline
+            .iter()
+            .any(|op| matches!(*op, SqlOperation::Distinct(_)));
         if distinct {
             sql.push_str("DISTINCT ");
         }
@@ -306,8 +313,30 @@ impl SqlCodeGenerator {
                 ref right,
             } => {
                 let left_str = self.generate_expression(left);
-                let right_str = self.generate_expression(right);
                 let op_str = Self::generate_binary_op(op);
+
+                // Handle IN/NOT IN specially: when right side is an Array, generate items
+                // directly as comma-separated list inside parens (avoid double-wrapping).
+                match *op {
+                    SqlBinaryOp::In | SqlBinaryOp::NotIn => {
+                        let items_str = match right.as_ref() {
+                            SqlExpression::Array(items) => items
+                                .iter()
+                                .map(|i| self.generate_expression(i))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            _ => self.generate_expression(right),
+                        };
+                        return if matches!(*op, SqlBinaryOp::In) {
+                            format!("{} IN ({})", left_str, items_str)
+                        } else {
+                            format!("{} NOT IN ({})", left_str, items_str)
+                        };
+                    }
+                    _ => {}
+                }
+
+                let right_str = self.generate_expression(right);
 
                 // Handle special cases for SQL syntax
                 match *op {
@@ -353,6 +382,18 @@ impl SqlCodeGenerator {
             SqlExpression::Function { ref name, ref args } => {
                 // Handle special string functions
                 match name.as_str() {
+                    "json_extract" if args.len() == 2 => {
+                        // Intermediate JSON object access: col->'key'
+                        let col_str = self.generate_expression(&args[0]);
+                        let key_str = self.generate_expression(&args[1]);
+                        return format!("{}->{}", col_str, key_str);
+                    }
+                    "json_extract_text" if args.len() == 2 => {
+                        // Final JSON text access: col->>'key'
+                        let col_str = self.generate_expression(&args[0]);
+                        let key_str = self.generate_expression(&args[1]);
+                        return format!("{}->>{}", col_str, key_str);
+                    }
                     "contains" | "startswith" | "endswith" if args.len() == 2 => {
                         // These are not standard SQL functions, convert to LIKE
                         if let (Some(arg0), Some(arg1)) = (args.first(), args.get(1)) {
@@ -361,7 +402,11 @@ impl SqlCodeGenerator {
 
                             match name.as_str() {
                                 "contains" => {
-                                    format!("{} LIKE '%{}%'", left_str, right_str.trim_matches('\''))
+                                    format!(
+                                        "{} LIKE '%{}%'",
+                                        left_str,
+                                        right_str.trim_matches('\'')
+                                    )
                                 }
                                 "startswith" => {
                                     format!("{} LIKE '{}%'", left_str, right_str.trim_matches('\''))
@@ -420,10 +465,7 @@ impl SqlCodeGenerator {
                 }
 
                 if let Some(default_expr) = default {
-                    case_str.push_str(&format!(
-                        " ELSE {}",
-                        self.generate_expression(default_expr)
-                    ));
+                    case_str.push_str(&format!(" ELSE {}", self.generate_expression(default_expr)));
                 }
 
                 case_str.push_str(" END");
@@ -449,6 +491,14 @@ impl SqlCodeGenerator {
                     SqlDialect::TSQL => format!("CAST({} AS {})", expr_str, type_str),
                     SqlDialect::SQLite => format!("CAST({} AS {})", expr_str, type_str),
                 }
+            }
+            SqlExpression::ArrayIndex {
+                ref expr,
+                ref index,
+            } => {
+                let expr_str = self.generate_expression(expr);
+                let index_str = self.generate_expression(index);
+                format!("{}[{}]", expr_str, index_str)
             }
             SqlExpression::Between {
                 ref expression,
@@ -476,30 +526,40 @@ impl SqlCodeGenerator {
                 format!("'{}'", escaped)
             }
             SqlLiteral::Integer(i) => i.to_string(),
-            SqlLiteral::Float(f) => f.to_string(),
+            SqlLiteral::Float(f) => {
+                let s = f.to_string();
+                // Ensure float literals always have a decimal point (e.g. "2" → "2.0")
+                if s.contains('.') || s.contains('e') {
+                    s
+                } else {
+                    format!("{}.0", s)
+                }
+            }
             SqlLiteral::Boolean(b) => {
                 if b {
                     match self.dialect {
-                        SqlDialect::PostgreSQL | SqlDialect::Standard | SqlDialect::SQLite => "TRUE".to_string(),
+                        SqlDialect::PostgreSQL | SqlDialect::Standard | SqlDialect::SQLite => {
+                            "TRUE".to_string()
+                        }
                         SqlDialect::MySQL | SqlDialect::TSQL => "1".to_string(),
                     }
                 } else {
                     match self.dialect {
-                        SqlDialect::PostgreSQL | SqlDialect::Standard | SqlDialect::SQLite => "FALSE".to_string(),
+                        SqlDialect::PostgreSQL | SqlDialect::Standard | SqlDialect::SQLite => {
+                            "FALSE".to_string()
+                        }
                         SqlDialect::MySQL | SqlDialect::TSQL => "0".to_string(),
                     }
                 }
             }
             SqlLiteral::Null => "NULL".to_string(),
-            SqlLiteral::DateTime(ref dt) => {
-                match self.dialect {
-                    SqlDialect::PostgreSQL => format!("'{}'::timestamp", dt),
-                    SqlDialect::MySQL => format!("CAST('{}' AS DATETIME)", dt),
-                    SqlDialect::SQLite => format!("datetime('{}')", dt),
-                    SqlDialect::TSQL => format!("CAST('{}' AS DATETIME)", dt),
-                    SqlDialect::Standard => format!("CAST('{}' AS TIMESTAMP)", dt),
-                }
-            }
+            SqlLiteral::DateTime(ref dt) => match self.dialect {
+                SqlDialect::PostgreSQL => format!("'{}'::timestamp", dt),
+                SqlDialect::MySQL => format!("CAST('{}' AS DATETIME)", dt),
+                SqlDialect::SQLite => format!("datetime('{}')", dt),
+                SqlDialect::TSQL => format!("CAST('{}' AS DATETIME)", dt),
+                SqlDialect::Standard => format!("CAST('{}' AS TIMESTAMP)", dt),
+            },
             SqlLiteral::Interval(ref ts) => {
                 match self.dialect {
                     SqlDialect::PostgreSQL => format!("INTERVAL '{}'", ts),
@@ -513,7 +573,7 @@ impl SqlCodeGenerator {
     const fn generate_binary_op(op: &SqlBinaryOp) -> &'static str {
         match *op {
             SqlBinaryOp::Equal => "=",
-            SqlBinaryOp::NotEqual => "<>",
+            SqlBinaryOp::NotEqual => "!=",
             SqlBinaryOp::LessThan => "<",
             SqlBinaryOp::LessThanOrEqual => "<=",
             SqlBinaryOp::GreaterThan => ">",
@@ -535,6 +595,8 @@ impl SqlCodeGenerator {
             SqlBinaryOp::IsNotNull => "IS NOT NULL",
             SqlBinaryOp::SimilarTo => "SIMILAR TO",
             SqlBinaryOp::NotSimilarTo => "NOT SIMILAR TO",
+            SqlBinaryOp::Concat => "||",
+            SqlBinaryOp::RegexMatch => "~",
         }
     }
 
@@ -546,8 +608,10 @@ impl SqlCodeGenerator {
                 // If the alias is the same as the expression, just output the expression
                 if alias == &expr_str {
                     expr_str.clone()
-                } else {
+                } else if self.needs_quoting(alias) {
                     format!("{} AS {}", expr_str, self.quote_identifier(alias))
+                } else {
+                    format!("{} AS {}", expr_str, alias)
                 }
             },
         )
@@ -616,35 +680,31 @@ impl SqlCodeGenerator {
             ),
             SqlAggregateFunction::StdDev => aggregate.expression.as_ref().map_or_else(
                 || "STDEV(*)".to_string(),
-                |expr| {
-                    match self.dialect {
-                        SqlDialect::PostgreSQL => format!("STDDEV({})", self.generate_expression(expr)),
-                        SqlDialect::MySQL => format!("STDDEV({})", self.generate_expression(expr)),
-                        _ => format!("STDEV({})", self.generate_expression(expr)),
-                    }
+                |expr| match self.dialect {
+                    SqlDialect::PostgreSQL => format!("STDDEV({})", self.generate_expression(expr)),
+                    SqlDialect::MySQL => format!("STDDEV({})", self.generate_expression(expr)),
+                    _ => format!("STDEV({})", self.generate_expression(expr)),
                 },
             ),
             SqlAggregateFunction::Variance => aggregate.expression.as_ref().map_or_else(
                 || "VARIANCE(*)".to_string(),
-                |expr| {
-                    match self.dialect {
-                        SqlDialect::PostgreSQL => format!("VARIANCE({})", self.generate_expression(expr)),
-                        SqlDialect::MySQL => format!("VARIANCE({})", self.generate_expression(expr)),
-                        _ => format!("VAR({})", self.generate_expression(expr)),
+                |expr| match self.dialect {
+                    SqlDialect::PostgreSQL => {
+                        format!("VARIANCE({})", self.generate_expression(expr))
                     }
+                    SqlDialect::MySQL => format!("VARIANCE({})", self.generate_expression(expr)),
+                    _ => format!("VAR({})", self.generate_expression(expr)),
                 },
             ),
             SqlAggregateFunction::Percentile(ref p) => aggregate.expression.as_ref().map_or_else(
                 || format!("PERCENTILE_CONT({}) WITHIN GROUP (ORDER BY *)", p),
-                |expr| {
-                    match self.dialect {
-                        SqlDialect::PostgreSQL => format!(
-                            "PERCENTILE_CONT({}) WITHIN GROUP (ORDER BY {})",
-                            p,
-                            self.generate_expression(expr)
-                        ),
-                        _ => format!("PERCENTILE({}, {})", self.generate_expression(expr), p),
-                    }
+                |expr| match self.dialect {
+                    SqlDialect::PostgreSQL => format!(
+                        "PERCENTILE_CONT({}) WITHIN GROUP (ORDER BY {})",
+                        p,
+                        self.generate_expression(expr)
+                    ),
+                    _ => format!("PERCENTILE({}, {})", self.generate_expression(expr), p),
                 },
             ),
             SqlAggregateFunction::ArrayAgg => aggregate.expression.as_ref().map_or_else(
@@ -653,21 +713,23 @@ impl SqlCodeGenerator {
             ),
             SqlAggregateFunction::StringAgg => aggregate.expression.as_ref().map_or_else(
                 || "STRING_AGG(*)".to_string(),
-                |expr| {
-                    match self.dialect {
-                        SqlDialect::PostgreSQL => {
-                            format!("STRING_AGG({}, ',')", self.generate_expression(expr))
-                        }
-                        SqlDialect::MySQL => {
-                            format!("GROUP_CONCAT({})", self.generate_expression(expr))
-                        }
-                        _ => format!("STRING_AGG({}, ',')", self.generate_expression(expr)),
+                |expr| match self.dialect {
+                    SqlDialect::PostgreSQL => {
+                        format!("STRING_AGG({}, ',')", self.generate_expression(expr))
                     }
+                    SqlDialect::MySQL => {
+                        format!("GROUP_CONCAT({})", self.generate_expression(expr))
+                    }
+                    _ => format!("STRING_AGG({}, ',')", self.generate_expression(expr)),
                 },
             ),
         };
 
-        format!("{} AS {}", func_str, self.quote_identifier(&aggregate.alias))
+        format!(
+            "{} AS {}",
+            func_str,
+            self.quote_identifier(&aggregate.alias)
+        )
     }
 
     const fn generate_join_kind(kind: &SqlJoinKind) -> &'static str {
@@ -707,26 +769,23 @@ impl SqlCodeGenerator {
                 }
             }
             SqlDataType::Text => "TEXT".to_string(),
-            SqlDataType::Boolean => {
-                match self.dialect {
-                    SqlDialect::MySQL => "TINYINT(1)".to_string(),
-                    SqlDialect::TSQL => "BIT".to_string(),
-                    _ => "BOOLEAN".to_string(),
-                }
-            }
+            SqlDataType::Boolean => match self.dialect {
+                SqlDialect::MySQL => "TINYINT(1)".to_string(),
+                SqlDialect::TSQL => "BIT".to_string(),
+                _ => "BOOLEAN".to_string(),
+            },
             SqlDataType::Date => "DATE".to_string(),
             SqlDataType::Time => "TIME".to_string(),
             SqlDataType::Timestamp => "TIMESTAMP".to_string(),
             SqlDataType::Timestamptz => "TIMESTAMP WITH TIME ZONE".to_string(),
             SqlDataType::Interval => "INTERVAL".to_string(),
             SqlDataType::Json => "JSON".to_string(),
-            SqlDataType::Jsonb => {
-                match self.dialect {
-                    SqlDialect::PostgreSQL => "JSONB".to_string(),
-                    _ => "JSON".to_string(),
-                }
-            }
+            SqlDataType::Jsonb => match self.dialect {
+                SqlDialect::PostgreSQL => "JSONB".to_string(),
+                _ => "JSON".to_string(),
+            },
             SqlDataType::Array(inner_type) => format!("{}[]", self.generate_data_type(inner_type)),
+            SqlDataType::Numeric => "NUMERIC".to_string(),
         }
     }
 
@@ -739,7 +798,10 @@ impl SqlCodeGenerator {
         sql.push_str("SELECT ");
 
         // Handle DISTINCT if present
-        let distinct = query.pipeline.iter().any(|op| matches!(*op, SqlOperation::Distinct(_)));
+        let distinct = query
+            .pipeline
+            .iter()
+            .any(|op| matches!(*op, SqlOperation::Distinct(_)));
         if distinct {
             sql.push_str("DISTINCT ");
         }
@@ -754,7 +816,10 @@ impl SqlCodeGenerator {
         // Add pipeline operations with proper indentation
         for operation in &query.pipeline {
             // Skip DISTINCT and Project as they're already handled
-            if matches!(*operation, SqlOperation::Distinct(_) | SqlOperation::Project(_)) {
+            if matches!(
+                *operation,
+                SqlOperation::Distinct(_) | SqlOperation::Project(_)
+            ) {
                 continue;
             }
 
@@ -777,11 +842,49 @@ impl SqlCodeGenerator {
     fn needs_quoting(&self, identifier: &str) -> bool {
         // SQL keywords that need quoting
         let keywords = [
-            "SELECT", "FROM", "WHERE", "JOIN", "INNER", "OUTER", "LEFT", "RIGHT", "FULL",
-            "CROSS", "UNION", "INTERSECT", "EXCEPT", "GROUP", "BY", "HAVING", "ORDER",
-            "LIMIT", "OFFSET", "AND", "OR", "NOT", "NULL", "TRUE", "FALSE", "IS",
-            "BETWEEN", "LIKE", "IN", "EXISTS", "DISTINCT", "AS", "ON", "ASC", "DESC",
-            "CASE", "WHEN", "THEN", "ELSE", "END", "CAST", "WITH", "RECURSIVE",
+            "SELECT",
+            "FROM",
+            "WHERE",
+            "JOIN",
+            "INNER",
+            "OUTER",
+            "LEFT",
+            "RIGHT",
+            "FULL",
+            "CROSS",
+            "UNION",
+            "INTERSECT",
+            "EXCEPT",
+            "GROUP",
+            "BY",
+            "HAVING",
+            "ORDER",
+            "LIMIT",
+            "OFFSET",
+            "AND",
+            "OR",
+            "NOT",
+            "NULL",
+            "TRUE",
+            "FALSE",
+            "IS",
+            "BETWEEN",
+            "LIKE",
+            "IN",
+            "EXISTS",
+            "DISTINCT",
+            "AS",
+            "ON",
+            "ASC",
+            "DESC",
+            "CASE",
+            "WHEN",
+            "THEN",
+            "ELSE",
+            "END",
+            "CAST",
+            "WITH",
+            "RECURSIVE",
         ];
 
         let upper = identifier.to_uppercase();
@@ -942,10 +1045,7 @@ mod tests {
         anyhow::ensure!(sql.contains("SELECT"), "expected 'SELECT' in SQL");
         anyhow::ensure!(sql.contains("events"), "expected 'events' in SQL");
         anyhow::ensure!(sql.contains("GROUP BY"), "expected 'GROUP BY' in SQL");
-        anyhow::ensure!(
-            sql.contains("COUNT(*)"),
-            "expected COUNT in SQL"
-        );
+        anyhow::ensure!(sql.contains("COUNT(*)"), "expected COUNT in SQL");
         Ok(())
     }
 
@@ -1014,10 +1114,7 @@ mod tests {
 
     #[test]
     fn test_cast_expression() {
-        let expr = SqlExpression::cast(
-            SqlExpression::column("age"),
-            SqlDataType::Integer,
-        );
+        let expr = SqlExpression::cast(SqlExpression::column("age"), SqlDataType::Integer);
 
         let mut generator = SqlCodeGenerator::new();
         let sql_expr = generator.generate_expression(&expr);

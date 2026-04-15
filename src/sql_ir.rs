@@ -110,6 +110,11 @@ pub enum SqlExpression {
         upper: Box<SqlExpression>,
         not: bool,
     },
+    /// Array subscript expression (e.g. `arr[1]`)
+    ArrayIndex {
+        expr: Box<SqlExpression>,
+        index: Box<SqlExpression>,
+    },
 }
 
 /// SQL Literal values
@@ -165,6 +170,12 @@ pub enum SqlBinaryOp {
     // Pattern matching
     SimilarTo, // PostgreSQL SIMILAR TO
     NotSimilarTo,
+
+    // Concatenation (||)
+    Concat,
+
+    // Regex match (~)
+    RegexMatch,
 }
 
 /// SQL Unary operators
@@ -238,8 +249,8 @@ pub enum SqlAggregateFunction {
     StdDev,
     Variance,
     Percentile(f64), // With specific percentile value
-    ArrayAgg, // PostgreSQL array aggregation
-    StringAgg, // PostgreSQL string aggregation
+    ArrayAgg,        // PostgreSQL array aggregation
+    StringAgg,       // PostgreSQL string aggregation
 }
 
 /// SQL data types for CAST expressions
@@ -262,6 +273,7 @@ pub enum SqlDataType {
     Json,
     Jsonb,
     Array(Box<SqlDataType>),
+    Numeric,
 }
 
 /// Join types
@@ -490,11 +502,7 @@ impl SqlExpression {
         }
     }
 
-    pub fn between(
-        expression: SqlExpression,
-        lower: SqlExpression,
-        upper: SqlExpression,
-    ) -> Self {
+    pub fn between(expression: SqlExpression, lower: SqlExpression, upper: SqlExpression) -> Self {
         SqlExpression::Between {
             expression: Box::new(expression),
             lower: Box::new(lower),
@@ -638,10 +646,7 @@ mod tests {
 
     #[test]
     fn test_cast_expression() {
-        let expr = SqlExpression::cast(
-            SqlExpression::column("age"),
-            SqlDataType::Integer,
-        );
+        let expr = SqlExpression::cast(SqlExpression::column("age"), SqlDataType::Integer);
 
         match expr {
             SqlExpression::Cast { target_type, .. } => {
