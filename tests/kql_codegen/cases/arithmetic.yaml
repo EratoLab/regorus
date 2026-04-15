@@ -1,0 +1,444 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# KQL code generation tests for arithmetic operations and expressions
+
+cases:
+  # ========================
+  # BASIC ARITHMETIC OPERATORS
+  # ========================
+  - note: addition-operator
+    rego: |
+      package test
+      
+      calculations contains result if {
+          some num in data.numbers
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "sum": num.a + num.b
+          }
+      }
+    expected_kql: |
+      numbers
+      | project a, b, sum = a + b
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(a:int, b:int) [
+        10, 5,
+        20, 15,
+        30, 25
+      ];
+      numbers
+      | project a, b, sum = a + b
+
+  - note: subtraction-operator
+    rego: |
+      package test
+      
+      calculations contains result if {
+          some num in data.numbers
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "difference": num.a - num.b
+          }
+      }
+    expected_kql: |
+      numbers
+      | project a, b, difference = a - b
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(a:int, b:int) [
+        100, 30,
+        50, 20,
+        75, 25
+      ];
+      numbers
+      | project a, b, difference = a - b
+
+  - note: multiplication-operator
+    rego: |
+      package test
+      
+      calculations contains result if {
+          some num in data.numbers
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "product": num.a * num.b
+          }
+      }
+    expected_kql: |
+      numbers
+      | project a, b, product = a * b
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(a:int, b:int) [
+        10, 5,
+        20, 3,
+        7, 8
+      ];
+      numbers
+      | project a, b, product = a * b
+
+  - note: division-operator
+    rego: |
+      package test
+      
+      calculations contains result if {
+          some num in data.numbers
+          num.b != 0
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "quotient": num.a / num.b
+          }
+      }
+    expected_kql: |
+      numbers
+      | where b != 0
+      | project a, b, quotient = a / b
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(a:int, b:int) [
+        100, 10,
+        50, 5,
+        75, 3
+      ];
+      numbers
+      | where b != 0
+      | project a, b, quotient = a / b
+
+  - note: modulo-operator
+    rego: |
+      package test
+      
+      calculations contains result if {
+          some num in data.numbers
+          num.b != 0
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "remainder": num.a % num.b
+          }
+      }
+    expected_kql: |
+      numbers
+      | where b != 0
+      | project a, b, remainder = a % b
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(a:int, b:int) [
+        17, 5,
+        23, 7,
+        100, 13
+      ];
+      numbers
+      | where b != 0
+      | project a, b, remainder = a % b
+
+  # ========================
+  # ARITHMETIC WITH FILTERS
+  # ========================
+  - note: addition-with-filter
+    rego: |
+      package test
+      
+      valid_sums contains result if {
+          some num in data.numbers
+          num.a + num.b > 50
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "sum": num.a + num.b
+          }
+      }
+    expected_kql: |
+      numbers
+      | where a + b > 50
+      | project a, b, sum = a + b
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(a:int, b:int) [
+        10, 5,
+        30, 25,
+        40, 20
+      ];
+      numbers
+      | where a + b > 50
+      | project a, b, sum = a + b
+
+  - note: multiplication-with-filter
+    rego: |
+      package test
+      
+      large_products contains result if {
+          some num in data.numbers
+          num.a * num.b >= 100
+          result := {
+              "a": num.a,
+              "b": num.b,
+              "product": num.a * num.b
+          }
+      }
+    expected_kql: |
+      numbers
+      | where a * b >= 100
+      | project a, b, product = a * b
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(a:int, b:int) [
+        5, 10,
+        10, 15,
+        20, 8
+      ];
+      numbers
+      | where a * b >= 100
+      | project a, b, product = a * b
+
+  # ========================
+  # COMPLEX ARITHMETIC EXPRESSIONS
+  # ========================
+  - note: complex-arithmetic-expression
+    rego: |
+      package test
+      
+      calculations contains result if {
+          some record in data.financial
+          result := {
+              "principal": record.principal,
+              "rate": record.rate,
+              "time": record.time,
+              "compound_interest": record.principal * (1 + record.rate) * record.time - record.principal
+          }
+      }
+    expected_kql: |
+      financial
+      | project principal, rate, time, compound_interest = principal * (1 + rate) * time - principal
+    test_kql: |
+      // Test with sample data
+      let financial = datatable(principal:real, rate:real, time:real) [
+        1000.0, 0.05, 2.0,
+        5000.0, 0.03, 3.0,
+        2500.0, 0.07, 1.5
+      ];
+      financial
+      | project principal, rate, time, compound_interest = principal * (1 + rate) * time - principal
+
+  - note: nested-arithmetic-operations
+    rego: |
+      package test
+      
+      calculations contains result if {
+          some shape in data.geometry
+          result := {
+              "length": shape.length,
+              "width": shape.width,
+              "height": shape.height,
+              "volume": shape.length * shape.width * shape.height,
+              "surface_area": 2 * (shape.length * shape.width + shape.width * shape.height + shape.height * shape.length)
+          }
+      }
+    expected_kql: |
+      geometry
+      | project length, width, height, volume = length * width * height, surface_area = 2 * (length * width + width * height + height * length)
+    test_kql: |
+      // Test with sample data
+      let geometry = datatable(length:real, width:real, height:real) [
+        10.0, 5.0, 3.0,
+        8.0, 6.0, 4.0,
+        12.0, 8.0, 6.0
+      ];
+      geometry
+      | project length, width, height, volume = length * width * height, surface_area = 2 * (length * width + width * height + height * length)
+
+  # ========================
+  # ARITHMETIC WITH CONSTANTS
+  # ========================
+  - note: arithmetic-with-constants
+    rego: |
+      package test
+      
+      tax_calculations contains result if {
+          some sale in data.sales
+          result := {
+              "item": sale.item,
+              "price": sale.price,
+              "tax": sale.price * 0.08,
+              "total": sale.price + (sale.price * 0.08),
+              "discount": sale.price * 0.1,
+              "final_price": sale.price + (sale.price * 0.08) - (sale.price * 0.1)
+          }
+      }
+    expected_kql: |
+      sales
+      | project item, price, tax = price * 0.08, total = price + price * 0.08, discount = price * 0.1, final_price = price + price * 0.08 - price * 0.1
+    test_kql: |
+      // Test with sample data
+      let sales = datatable(item:string, price:real) [
+        "laptop", 999.99,
+        "mouse", 29.99,
+        "keyboard", 79.99
+      ];
+      sales
+      | project item, price, tax = price * 0.08, total = price + price * 0.08, discount = price * 0.1, final_price = price + price * 0.08 - price * 0.1
+
+  # ========================
+  # NEGATIVE NUMBERS AND UNARY OPERATIONS
+  # ========================
+  - note: negative-numbers
+    rego: |
+      package test
+      
+      temperature_conversions contains result if {
+          some temp in data.temperatures
+          result := {
+              "celsius": temp.celsius,
+              "fahrenheit": temp.celsius * 9 / 5 + 32,
+              "kelvin": temp.celsius + 273.15,
+              "negative_celsius": -temp.celsius
+          }
+      }
+    expected_kql: |
+      temperatures
+      | project celsius, fahrenheit = celsius * 9 / 5 + 32, kelvin = celsius + 273.15, negative_celsius = -celsius
+    test_kql: |
+      // Test with sample data
+      let temperatures = datatable(celsius:real) [
+        0.0,
+        25.0,
+        100.0,
+        -10.0
+      ];
+      temperatures
+      | project celsius, fahrenheit = celsius * 9 / 5 + 32, kelvin = celsius + 273.15, negative_celsius = -celsius
+
+  # ========================
+  # ARITHMETIC IN CONDITIONS
+  # ========================
+  - note: arithmetic-conditions-multiple
+    rego: |
+      package test
+      
+      valid_ranges contains result if {
+          some measurement in data.measurements
+          measurement.value1 + measurement.value2 > 100
+          measurement.value1 * measurement.value2 < 10000
+          measurement.value1 - measurement.value2 >= 0
+          result := {
+              "value1": measurement.value1,
+              "value2": measurement.value2,
+              "sum": measurement.value1 + measurement.value2,
+              "product": measurement.value1 * measurement.value2,
+              "difference": measurement.value1 - measurement.value2
+          }
+      }
+    expected_kql: |
+      measurements
+      | where value1 + value2 > 100 and value1 * value2 < 10000 and value1 - value2 >= 0
+      | project value1, value2, sum = value1 + value2, product = value1 * value2, difference = value1 - value2
+    test_kql: |
+      // Test with sample data
+      let measurements = datatable(value1:int, value2:int) [
+        80, 30,
+        60, 50,
+        90, 20,
+        100, 10
+      ];
+      measurements
+      | where value1 + value2 > 100 and value1 * value2 < 10000 and value1 - value2 >= 0
+      | project value1, value2, sum = value1 + value2, product = value1 * value2, difference = value1 - value2
+
+  # ========================
+  # FLOATING POINT ARITHMETIC
+  # ========================
+  - note: floating-point-precision
+    rego: |
+      package test
+      
+      precise_calculations contains result if {
+          some finance in data.financial_data
+          result := {
+              "amount": finance.amount,
+              "rate": finance.rate,
+              "years": finance.years,
+              "monthly_rate": finance.rate / 12,
+              "monthly_payment": (finance.amount * (finance.rate / 12)) / (1 - (1 + finance.rate / 12))
+          }
+      }
+    expected_kql: |
+      financial_data
+      | project amount, rate, years, monthly_rate = rate / 12, monthly_payment = amount * (rate / 12) / (1 - (1 + rate / 12))
+    test_kql: |
+      // Test with sample data
+      let financial_data = datatable(amount:real, rate:real, years:real) [
+        100000.0, 0.045, 30.0,
+        250000.0, 0.035, 15.0,
+        75000.0, 0.055, 10.0
+      ];
+      financial_data
+      | project amount, rate, years, monthly_rate = rate / 12, monthly_payment = amount * (rate / 12) / (1 - (1 + rate / 12))
+
+  # ========================
+  # ARITHMETIC WITH MIXED TYPES
+  # ========================
+  - note: mixed-type-arithmetic
+    rego: |
+      package test
+      
+      conversions contains result if {
+          some number in data.mixed_numbers
+          result := {
+              "int_value": number.int_value,
+              "float_value": number.float_value,
+              "mixed_sum": number.int_value + number.float_value,
+              "mixed_product": number.int_value * number.float_value,
+              "percentage": number.int_value / number.float_value * 100
+          }
+      }
+    expected_kql: |
+      mixed_numbers
+      | project int_value, float_value, mixed_sum = int_value + float_value, mixed_product = int_value * float_value, percentage = int_value / float_value * 100
+    test_kql: |
+      // Test with sample data
+      let mixed_numbers = datatable(int_value:int, float_value:real) [
+        10, 3.14,
+        25, 2.5,
+        100, 0.75
+      ];
+      mixed_numbers
+      | project int_value, float_value, mixed_sum = int_value + float_value, mixed_product = int_value * float_value, percentage = int_value / float_value * 100
+
+  # ========================
+  # OPERATOR PRECEDENCE VERIFICATION
+  # ========================
+  - note: operator-precedence
+    rego: |
+      package test
+      
+      precedence_tests contains result if {
+          some value in data.test_values
+          result := {
+              "a": value.a,
+              "b": value.b,
+              "c": value.c,
+              "add_mult": value.a + value.b * value.c,
+              "mult_add": (value.a + value.b) * value.c,
+              "div_sub": value.a / value.b - value.c,
+              "sub_div": value.a - value.b / value.c,
+              "complex": value.a + value.b * value.c - value.a / value.b
+          }
+      }
+    expected_kql: |
+      test_values
+      | project a, b, c, add_mult = a + b * c, mult_add = (a + b) * c, div_sub = a / b - c, sub_div = a - b / c, complex = a + b * c - a / b
+    test_kql: |
+      // Test with sample data
+      let test_values = datatable(a:real, b:real, c:real) [
+        10.0, 2.0, 3.0,
+        20.0, 4.0, 5.0,
+        15.0, 3.0, 2.0
+      ];
+      test_values
+      | project a, b, c, add_mult = a + b * c, mult_add = (a + b) * c, div_sub = a / b - c, sub_div = a - b / c, complex = a + b * c - a / b

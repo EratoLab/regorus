@@ -1,0 +1,106 @@
+A statement of the form `some var in data.table` indicates an
+table var.
+Each such var has the following associated entities:
+   1. The order in which the var appears in the rule body
+   2. The table on which the var is iterating on
+   3. The conditions in which the var is used, but no other vars are used.
+       Let's call these var conditions.
+   4. Join conditions - The conditions of the form var_a == var_b
+      where both var_a and var_b are table vars.
+   5. Used properties - The names of properties of the var that are used in
+      the rego code.
+
+
+In KQL, the var conditions must immediately follow the var using where clauses.
+E.g:
+   some user in data.users
+   ...
+   user.age >= 20
+becomes
+   users
+   | where age >= 20
+
+Use the join conditions to emit KQL join operators.
+In the current table, use project to retain only the used properties, while also renaming them
+using the table's var name as the prefix.
+Example:
+    | join kind=inner (
+        Dependencies 
+        | where type == "DependencyOf"
+        | project var_source_id = source_id) 
+    on id == source_id
+In the join, $right must still be used for the current_table and $left for the accumulated table. There will not be any conflits after join. Use of $left and $right is a KQL requirement.
+
+Cross-table conditions are conditions that involve multiple table variables but are
+not join conditions (typically != comparisons). These should be applied as where
+clauses after all joins are complete, using the appropriate column prefixes.
+For example:
+   employee.id != manager.id
+becomes (after joining Employees tables):
+   | where employee_id != manager_id
+
+KQL Join Condition Mapping:
+In KQL joins, $left refers to the accumulated result from previous operations (base table + previous joins),
+and $right refers to the new table being joined. When translating Rego join conditions like "var_a.field == var_b.field",
+the $left/$right assignment must be based on join table order, not the syntactic order in Rego.
+For example, if joining Dependencies to Resources:
+   - $left = Resources (the accumulated result)  
+   - $right = Dependencies (the new table being joined)
+So "dep.source_id == vm.id" should become "$left.id == $right.source_id" not "$left.source_id == $right.id".
+When emitting a join, the table being joined is considered "right" and the other table is considered "left". So, $left and $right prefixes can be easily determined by whether the var of an expression belongs to the "right" table or not.
+
+Statements using a var don't necessarily have to immediately follow a var.
+That is,
+   some var in data.table
+   var.foo != 5
+   ...
+and
+   some var in data.table
+   ...
+   var.foo != 5
+are semantically equivalent.
+
+IF THERE ARE NO JOINS, retain original column names. No need of adding var prefixes.
+This is because there will not be any conflicts.
+
+In addition to conditions (both var, join conditions, and cross-table) the other allowed statements
+are assignments. 
+An assignment is of the form:
+    var := expression
+An assignment typically becomes a KQL extend operation.
+however, if the var also follows the rules contain clause, then the assignment
+becomes a projection.
+Note that assignments can also be written using the = operator:
+     var = expression
+
+An assignment defines an assignment var and depends on the vars used in the
+expression. These vars could be table vars or other vars defined by assignment.
+An assignment appears in KQL only after its dependencies have appeared.
+
+Projections of the form `var = var`, should just be emitted as `var`.
+
+For predictable ordering use BTreeMap, BTreeSet instead of hash based tables.
+
+DO NOT USE HEURISTICS IN IMPLEMENTATION. 
+DO NOT HARD CODE ANYTHING.
+
+The precedence will already be encoded in Rego via parenthesis. 
+Therefore just keep track of whether the original expresson had parenthesis.
+If so, it is safe  to emit parenthesis in kql.
+
+Emit gathered information for debugging.
+
+
+=== Rego Subset ===
+
+The rule must be of the form:
+
+filetered_table contains var if {
+    ...
+    var = {
+        "field1": ...,
+        "field2": ...
+        ...
+    }
+}
+

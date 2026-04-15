@@ -1,0 +1,85 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# KQL code generation tests for error cases and unsupported constructs
+
+cases:
+  - note: unsupported-function-call
+    rego: |
+      package test
+      
+      result_set contains result if {
+          some user in data.users
+          custom_function(user.name, "admin")
+          result := {
+              "name": user.name
+          }
+      }
+    error: "database subset: unsupported function 'custom_function'"
+
+  - note: recursion-not-supported
+    rego: |
+      package test
+      
+      factorial(n) = 1 if { n <= 1 }
+      factorial(n) = n * factorial(n - 1) if { n > 1 }
+      
+      result_set contains result if {
+          some item in data.items
+          result := {
+              "factorial": factorial(item.value)
+          }
+      }
+    error: "database subset: only 'rule_name contains var if"
+
+  - note: array-comprehension-not-supported
+    rego: |
+      package test
+      
+      result_set contains result if {
+          some user in data.users
+          allowed_users = [u | data.users[u]; u.active == true]
+          result := {
+              "allowed": allowed_users
+          }
+      }
+    error: "database subset: array comprehensions are not supported"
+
+  - note: object-comprehension-not-supported  
+    rego: |
+      package test
+      
+      result_set contains result if {
+          some user in data.users
+          user_roles = {u: role | data.users[u]; u.role = role}
+          result := {
+              "roles": user_roles
+          }
+      }
+    error: "database subset: object comprehensions are not supported"
+
+  - note: set-comprehension-not-supported
+    rego: |
+      package test
+      
+      result_set contains result if {
+          some user in data.users
+          active_users = {u | data.users[u]; u.active == true}
+          result := {
+              "active": active_users
+          }
+      }
+    error: "database subset: set comprehensions are not supported"
+
+  - note: every-quantifier-not-supported
+    rego: |
+      package test
+      
+      result_set contains result if {
+          some user in data.users
+          every u in data.users { u.active == true }
+          result := {
+              "name": user.name
+          }
+      }
+    error: "database subset: 'every' statements are not supported"

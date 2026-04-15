@@ -1,0 +1,297 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Basic KQL code generation tests for simple rules
+
+cases:
+  - note: simple-allow-rule
+    rego: |
+      package authz
+      
+      allowed_users contains result if {
+          some user in data.users
+          user.role == "admin"
+          user.active == true
+          result := {
+              "role": user.role,
+              "active": user.active
+          }
+      }
+    expected_kql: |
+      users
+      | where role == "admin" and active == true
+      | project role, active
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, role:string, active:bool) [
+          "alice", "admin", true,
+          "bob", "user", true,
+          "charlie", "admin", false
+      ];
+      users
+      | where role == "admin" and active == true
+
+  - note: single-condition
+    rego: |
+      package test
+      
+      security_employees contains result if {
+          some employee in data.employees
+          employee.department == "security"
+          result := {
+              "department": employee.department
+          }
+      }
+    expected_kql: |
+      employees
+      | where department == "security"
+      | project department
+    test_kql: |
+      // Test with sample data
+      let employees = datatable(name:string, department:string) [
+          "alice", "security",
+          "bob", "hr",
+          "charlie", "security"
+      ];
+      employees
+      | where department == "security"
+
+  - note: numeric-comparison
+    rego: |
+      package test
+      
+      eligible_users contains result if {
+          some user in data.users
+          user.age >= 18
+          user.score > 85
+          result := {
+              "age": user.age,
+              "score": user.score
+          }
+      }
+    expected_kql: |
+      users
+      | where age >= 18 and score > 85
+      | project age, score
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, age:int, score:int) [
+          "alice", 25, 90,
+          "bob", 16, 95,
+          "charlie", 22, 75
+      ];
+      users
+      | where age >= 18 and score > 85
+
+  - note: string-literal-with-quotes
+    rego: |
+      package test
+      
+      target_users contains result if {
+          some user in data.users
+          user.name == "John \"Doe\""
+          result := { "user_name": user.name }
+      }
+    expected_kql: |
+      users
+      | where name == "John \"Doe\""
+      | project user_name = name
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string) [
+          "John \"Doe\"",
+          "Jane Smith",
+          "Bob Wilson"
+      ];
+      users
+      | where name == "John \"Doe\""
+
+  - note: simple-condition
+    rego: |
+      package test
+      
+      admin_users contains result if {
+          some user in data.users
+          user.role == "admin"
+          result := { "role": user.role }
+      }
+    expected_kql: |
+      users
+      | where role == "admin"
+      | project role
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, role:string) [
+        "alice", "admin",
+        "bob", "user",
+        "charlie", "admin"
+      ];
+      users 
+      | where role == "admin" 
+      | project role
+
+  - note: multiple-conditions
+    rego: |
+      package test
+      
+      active_admins contains result if {
+          some user in data.users
+          user.role == "admin"
+          user.active == true
+          result := {
+              "role": user.role,
+              "active": user.active
+          }
+      }
+    expected_kql: |
+      users
+      | where role == "admin" and active == true
+      | project role, active
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, role:string, active:bool) [
+        "alice", "admin", true,
+        "bob", "admin", false,
+        "charlie", "user", true
+      ];
+      users 
+      | where role == "admin" and active == true 
+      | project role, active
+
+  - note: comparison-operators
+    rego: |
+      package test
+      
+      qualified_users contains result if {
+          some user in data.users
+          user.age >= 18
+          user.score < 100
+          result := {
+              "age": user.age,
+              "score": user.score
+          }
+      }
+    expected_kql: |
+      users
+      | where age >= 18 and score < 100
+      | project age, score
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, age:int, score:int) [
+        "alice", 25, 85,
+        "bob", 16, 90,
+        "charlie", 22, 105
+      ];
+      users 
+      | where age >= 18 and score < 100 
+      | project age, score
+
+  - note: string-comparison
+    rego: |
+      package test
+      
+      filtered_employees contains result if {
+          some employee in data.employees
+          employee.name == "alice"
+          employee.department != "finance"
+          result := {
+              "name": employee.name,
+              "department": employee.department
+          }
+      }
+    expected_kql: |
+      employees
+      | where name == "alice" and department != "finance"
+      | project name, department
+    test_kql: |
+      // Test with sample data
+      let employees = datatable(name:string, department:string) [
+        "alice", "engineering",
+        "alice", "finance",
+        "bob", "engineering"
+      ];
+      employees 
+      | where name == "alice" and department != "finance" 
+      | project name, department
+
+  - note: boolean-conditions
+    rego: |
+      package test
+      
+      valid_accounts contains result if {
+          some account in data.accounts
+          account.verified == true
+          account.suspended == false
+          result := {
+              "verified": account.verified,
+              "suspended": account.suspended
+          }
+      }
+    expected_kql: |
+      accounts
+      | where verified == true and suspended == false
+      | project verified, suspended
+    test_kql: |
+      // Test with sample data
+      let accounts = datatable(id:string, verified:bool, suspended:bool) [
+          "acc1", true, false,
+          "acc2", false, false,
+          "acc3", true, true
+      ];
+      accounts
+      | where verified == true and suspended == false 
+      | project verified, suspended
+
+  - note: numeric-comparisons
+    rego: |
+      package test
+      
+      high_value_resources contains result if {
+          some resource in data.resources
+          resource.priority > 5
+          resource.cost <= 1000.50
+          result := {
+              "priority": resource.priority,
+              "cost": resource.cost
+          }
+      }
+    expected_kql: |
+      resources
+      | where priority > 5 and cost <= 1000.5
+      | project priority, cost
+    test_kql: |
+      // Test with sample data
+      let resources = datatable(name:string, priority:int, cost:real) [
+          "server1", 8, 500.0,
+          "server2", 3, 800.0,
+          "server3", 7, 1200.0
+      ];
+      resources
+      | where priority > 5 and cost <= 1000.5 
+      | project priority, cost
+
+  - note: null-comparison
+    rego: |
+      package test
+      
+      active_users contains result if {
+          some user in data.users
+          user.deleted_at == null
+          result := {
+              "deleted_at": user.deleted_at
+          }
+      }
+    expected_kql: |
+      users
+      | where isnull(deleted_at)
+      | project deleted_at
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, deleted_at:datetime) [
+          "alice", datetime(null),
+          "bob", datetime("2023-01-01"),
+          "charlie", datetime(null)
+      ];
+      users
+      | where isnull(deleted_at) 
+      | project deleted_at

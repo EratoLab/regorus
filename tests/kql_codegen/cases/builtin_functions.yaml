@@ -1,0 +1,365 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# KQL code generation tests for Rego builtin functions
+
+cases:
+  - note: string-contains-function
+    rego: |
+      package test
+      
+      email_users contains result if {
+          some user in data.users
+          contains(user.email, "@company.com")
+          result := {
+              "name": user.name,
+              "email": user.email
+          }
+      }
+    expected_kql: |
+      users
+      | where email contains "@company.com"
+      | project name, email
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, email:string) [
+        "alice", "alice@company.com",
+        "bob", "bob@external.com",
+        "charlie", "charlie@company.com"
+      ];
+      users
+      | where email contains "@company.com"
+      | project name, email
+
+  - note: string-startswith-function
+    rego: |
+      package test
+      
+      admin_users contains result if {
+          some user in data.users
+          startswith(user.username, "admin_")
+          result := {
+              "username": user.username,
+              "role": user.role
+          }
+      }
+    expected_kql: |
+      users
+      | where username startswith "admin_"
+      | project username, role
+    test_kql: |
+      // Test with sample data
+      let users = datatable(username:string, role:string) [
+        "admin_alice", "admin",
+        "user_bob", "user",
+        "admin_charlie", "admin"
+      ];
+      users
+      | where username startswith "admin_"
+      | project username, role
+
+  - note: string-endswith-function
+    rego: |
+      package test
+      
+      temp_files contains result if {
+          some file in data.files
+          endswith(file.name, ".tmp")
+          result := {
+              "name": file.name,
+              "size": file.size
+          }
+      }
+    expected_kql: |
+      files
+      | where name endswith ".tmp"
+      | project name, size
+    test_kql: |
+      // Test with sample data
+      let files = datatable(name:string, size:int) [
+        "document.pdf", 1024,
+        "cache.tmp", 512,
+        "backup.tmp", 2048,
+        "readme.txt", 256
+      ];
+      files
+      | where name endswith ".tmp"
+      | project name, size
+
+  - note: math-abs-function
+    rego: |
+      package test
+      
+      significant_changes contains result if {
+          some change in data.changes
+          abs(change.value) > 10
+          result := {
+              "name": change.name,
+              "value": change.value
+          }
+      }
+    expected_kql: |
+      changes
+      | where abs(value) > 10
+      | project name, value
+    test_kql: |
+      // Test with sample data
+      let changes = datatable(name:string, value:real) [
+        "change1", 15.5,
+        "change2", -8.2,
+        "change3", -12.8,
+        "change4", 5.1
+      ];
+      changes
+      | where abs(value) > 10
+      | project name, value
+
+  - note: math-floor-function
+    rego: |
+      package test
+      
+      rounded_scores contains result if {
+          some score in data.scores
+          floor(score.value) >= 85
+          result := {
+              "student": score.student,
+              "value": score.value
+          }
+      }
+    expected_kql: |
+      scores
+      | where floor(value) >= 85
+      | project student, value
+    test_kql: |
+      // Test with sample data
+      let scores = datatable(student:string, value:real) [
+        "alice", 87.3,
+        "bob", 84.9,
+        "charlie", 91.2,
+        "diana", 82.1
+      ];
+      scores
+      | where floor(value) >= 85
+      | project student, value
+
+  - note: string-lower-function
+    rego: |
+      package test
+      
+      normalized_users contains result if {
+          some user in data.users
+          lower(user.role) == "admin"
+          result := {
+              "name": user.name,
+              "role": user.role
+          }
+      }
+    expected_kql: |
+      users
+      | where tolower(role) == "admin"
+      | project name, role
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, role:string) [
+        "alice", "Admin",
+        "bob", "User",
+        "charlie", "ADMIN",
+        "diana", "user"
+      ];
+      users
+      | where tolower(role) == "admin"
+      | project name, role
+
+  - note: string-upper-function
+    rego: |
+      package test
+      
+      shouting_messages contains result if {
+          some msg in data.messages
+          upper(msg.text) == msg.text
+          result := {
+              "id": msg.id,
+              "text": msg.text
+          }
+      }
+    expected_kql: |
+      messages
+      | where toupper(text) == text
+      | project id, text
+    test_kql: |
+      // Test with sample data
+      let messages = datatable(id:int, text:string) [
+        1, "HELLO WORLD",
+        2, "Hello World",
+        3, "URGENT MESSAGE",
+        4, "normal message"
+      ];
+      messages
+      | where toupper(text) == text
+      | project id, text
+
+  - note: type-checking-is-string
+    rego: |
+      package test
+      
+      string_fields contains result if {
+          some field in data.fields
+          is_string(field.value)
+          result := {
+              "name": field.name,
+              "value": field.value
+          }
+      }
+    expected_kql: |
+      fields
+      | where gettype(value) == "string"
+      | project name, value
+    test_kql: |
+      // Test with sample data
+      let fields = datatable(name:string, value:dynamic) [
+        "field1", "text_value",
+        "field2", 42,
+        "field3", "another_string",
+        "field4", 3.14
+      ];
+      fields
+      | where gettype(value) == "string"
+      | project name, value
+
+  - note: type-checking-is-number
+    rego: |
+      package test
+      
+      numeric_fields contains result if {
+          some field in data.fields
+          is_number(field.value)
+          result := {
+              "name": field.name,
+              "value": field.value
+          }
+      }
+    expected_kql: |
+      fields
+      | where (gettype(value) == "int" or gettype(value) == "real")
+      | project name, value
+    test_kql: |
+      // Test with sample data
+      let fields = datatable(name:string, value:dynamic) [
+        "field1", "text_value",
+        "field2", 42,
+        "field3", "another_string",
+        "field4", 3.14
+      ];
+      fields
+      | where (gettype(value) == "int" or gettype(value) == "real")
+      | project name, value
+
+  - note: string-replace-function
+    rego: |
+      package test
+      
+      sanitized_names contains result if {
+          some user in data.users
+          result := {
+              "sanitized_name": replace(user.name, " ", "_"),
+              "role": user.role
+          }
+      }
+    expected_kql: |
+      users
+      | project sanitized_name = replace_string(name, " ", "_"), role
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, role:string) [
+        "John Doe", "admin",
+        "Jane Smith", "user",
+        "Bob Wilson", "manager"
+      ];
+      users
+      | project sanitized_name = replace_string(name, " ", "_"), role
+
+  - note: math-ceiling-function
+    rego: |
+      package test
+      
+      rounded_up_scores contains result if {
+          some score in data.scores
+          ceil(score.value) > 90
+          result := {
+              "student": score.student,
+              "value": score.value
+          }
+      }
+    expected_kql: |
+      scores
+      | where ceiling(value) > 90
+      | project student, value
+    test_kql: |
+      // Test with sample data
+      let scores = datatable(student:string, value:real) [
+        "alice", 89.7,
+        "bob", 90.2,
+        "charlie", 88.9,
+        "diana", 91.5
+      ];
+      scores
+      | where ceiling(value) > 90
+      | project student, value
+
+  - note: combined-builtin-functions
+    rego: |
+      package test
+      
+      processed_users contains result if {
+          some user in data.users
+          contains(lower(user.email), "@company.com")
+          abs(user.score) >= 50
+          result := {
+              "name": user.name,
+              "email": user.email,
+              "score": user.score
+          }
+      }
+    expected_kql: |
+      users
+      | where tolower(email) contains "@company.com" and abs(score) >= 50
+      | project name, email, score
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, email:string, score:real) [
+        "alice", "Alice@Company.com", -55.2,
+        "bob", "bob@external.org", 45.8,
+        "charlie", "Charlie@Company.com", 62.1,
+        "diana", "diana@company.com", -48.5
+      ];
+      users
+      | where tolower(email) contains "@company.com" and abs(score) >= 50
+      | project name, email, score
+
+  - note: nested-function-calls
+    rego: |
+      package test
+      
+      formatted_users contains result if {
+          some user in data.users
+          startswith(upper(user.role), "ADMIN")
+          result := {
+              "name": user.name,
+              "role": user.role
+          }
+      }
+    expected_kql: |
+      users
+      | where toupper(role) startswith "ADMIN"
+      | project name, role
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, role:string) [
+        "alice", "admin",
+        "bob", "user",
+        "charlie", "Administrator",
+        "diana", "Admin_User"
+      ];
+      users
+      | where toupper(role) startswith "ADMIN"
+      | project name, role

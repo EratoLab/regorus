@@ -1,0 +1,113 @@
+# Complex Relationship Pattern Tests
+
+cases:
+  - note: "vm-dependency-health-lookup"
+    pretty_print: true
+    rego: |
+      package test
+      
+      # Complex relationship query: VM -> Dependencies -> SQLServer -> ServiceGroup -> Health
+      result contains output if {
+        some vm in data.Resources
+        vm.type == "virtualMachine"
+        
+        # Find dependencies of this VM
+        some dep1 in data.Dependencies
+        dep1.source_id == vm.id
+        dep1.type == "DependencyOf"
+        
+        # Find the target SQLServer
+        some sql in data.Resources
+        sql.type == "SQLServer"
+        sql.id == dep1.target_id
+        
+        # Find service group dependencies
+        some dep2 in data.Dependencies
+        dep2.source_id == sql.id
+        dep2.type == "ServiceGroupMember"
+        
+        # Find health information
+        some health in data.HealthResources
+        health.service_group_id == dep2.target_id
+        health.health_id != null
+        
+        # Create output object
+        output := {
+          "vm_id": vm.id,
+          "health_id": health.health_id
+        }
+      }
+    expected_kql: |
+      Resources
+      | where type == "virtualMachine"
+      | project vm_id = id, vm_type = type
+      | join kind=inner (
+          Dependencies
+          | where type == "DependencyOf"
+          | project dep1_source_id = source_id, dep1_target_id = target_id, dep1_type = type
+        )
+        on $left.vm_id == $right.dep1_source_id
+      | join kind=inner (
+          Resources
+          | where type == "SQLServer"
+          | project sql_id = id, sql_type = type
+        )
+        on $left.dep1_target_id == $right.sql_id
+      | join kind=inner (
+          Dependencies
+          | where type == "ServiceGroupMember"
+          | project dep2_source_id = source_id, dep2_target_id = target_id, dep2_type = type
+        )
+        on $left.sql_id == $right.dep2_source_id
+      | join kind=inner (
+          HealthResources
+          | where isnotnull(health_id)
+          | project health_health_id = health_id, health_service_group_id = service_group_id
+        )
+        on $left.dep2_target_id == $right.health_service_group_id
+      | project vm_id, health_id = health_health_id
+    test_kql: |
+      // Test data setup
+      let Resources = datatable(id:string, type:string) [
+        "vm1", "virtualMachine",
+        "vm2", "virtualMachine",
+        "sql1", "SQLServer",
+        "sql2", "SQLServer"
+      ];
+      let Dependencies = datatable(id:string, source_id:string, target_id:string, type:string) [
+        // VM -> SQL deps
+        "dep1", "vm1", "sql1", "DependencyOf",
+        "dep2", "vm2", "sql2", "DependencyOf",
+        // SQL -> ServiceGroup deps
+        "dep3", "sql1", "sg1", "ServiceGroupMember",
+        "dep4", "sql2", "sg2", "ServiceGroupMember"
+      ];
+      let HealthResources = datatable(service_group_id:string, health_id:string) [
+        "sg1", "health1",
+        "sg2", "health2"
+      ];
+      // Query under test
+      Resources
+      | where type == "virtualMachine"
+      | project vm_id = id, vm_type = type
+      | join kind=inner (
+          Dependencies 
+          | where type == "DependencyOf"
+          | project dep1_source_id = source_id, dep1_target_id = target_id, dep1_type = type) 
+        on $left.vm_id == $right.dep1_source_id
+      | join kind=inner (
+          Resources 
+          | where type == "SQLServer"
+          | project sql_id = id, sql_type = type) 
+        on $left.dep1_target_id == $right.sql_id
+      | join kind=inner (
+          Dependencies 
+          | where type == "ServiceGroupMember"
+          | project dep2_source_id = source_id, dep2_target_id = target_id, dep2_type = type) 
+        on $left.sql_id == $right.dep2_source_id
+      | join kind=inner (
+          HealthResources 
+          | where isnotnull(health_id)
+          | project health_service_group_id = service_group_id, health_health_id = health_id) 
+        on $left.dep2_target_id == $right.health_service_group_id
+      | project vm_id, health_id = health_health_id

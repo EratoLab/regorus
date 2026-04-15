@@ -1,0 +1,151 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# KQL code generation tests for membership operations
+
+cases:
+  - note: simple-membership
+    rego: |
+      package test
+      
+      privileged_users contains result if {
+          some user in data.users
+          user.role in {"admin", "manager"}
+          result := {
+              "name": user.name,
+              "role": user.role
+          }
+      }
+    expected_kql: |
+      users
+      | where role in (pack_array("admin", "manager"))
+      | project name, role
+
+  - note: membership-with-additional-conditions
+    rego: |
+      package test
+      
+      engineering_staff contains result if {
+          some employee in data.employees
+          employee.role in {"admin", "user", "guest"}
+          employee.department == "engineering"
+          result := {
+              "name": employee.name,
+              "role": employee.role,
+              "department": employee.department
+          }
+      }
+    expected_kql: |
+      employees
+      | where role in (pack_array("admin", "user", "guest")) and department == "engineering"
+      | project name, role, department
+
+  - note: membership-with-condition
+    rego: |
+      package test
+      
+      active_privileged_users contains result if {
+          some user in data.users
+          user.role in {"admin", "manager"}
+          user.active == true
+          result := {
+              "name": user.name,
+              "role": user.role,
+              "active": user.active
+          }
+      }
+    expected_kql: |
+      users
+      | where role in (pack_array("admin", "manager")) and active == true
+      | project name, role, active
+
+  - note: multiple-membership-checks
+    rego: |
+      package test
+      
+      key_personnel contains result if {
+          some employee in data.employees
+          employee.role in {"admin", "manager"}
+          employee.department in {"engineering", "security"}
+          result := {
+              "name": employee.name,
+              "role": employee.role,
+              "department": employee.department
+          }
+      }
+    expected_kql: |
+      employees
+      | where role in (pack_array("admin", "manager")) and department in (pack_array("engineering", "security"))
+      | project name, role, department
+
+  - note: membership-with-numbers
+    rego: |
+      package test
+      
+      junior_users contains result if {
+          some user in data.users
+          user.level in {1, 2, 3}
+          result := {
+              "name": user.name,
+              "level": user.level
+          }
+      }
+    expected_kql: |
+      users
+      | where level in (pack_array(1, 2, 3))
+      | project name, level
+
+  - note: membership-mixed-types
+    rego: |
+      package test
+      
+      filtered_resources contains result if {
+          some resource in data.resources
+          resource.type in {"public", "private"}
+          resource.priority in {1, 2}
+          result := {
+              "id": resource.id,
+              "type": resource.type,
+              "priority": resource.priority
+          }
+      }
+    expected_kql: |
+      resources
+      | where type in (pack_array("public", "private")) and priority in (pack_array(1, 2))
+      | project id, type, priority
+
+  - note: membership-with-mixed-types
+    rego: |
+      package test
+      
+      active_events contains result if {
+          some event in data.events
+          event.status in {"active", "pending"}
+          event.priority in {1, 2}
+          result := {
+              "id": event.id,
+              "status": event.status,
+              "priority": event.priority
+          }
+      }
+    expected_kql: |
+      events
+      | where status in (pack_array("active", "pending")) and priority in (pack_array(1, 2))
+      | project id, status, priority
+
+  - note: nested-field-membership
+    rego: |
+      package test
+      
+      authorized_users contains result if {
+          some user in data.users
+          user.permissions.role in {"read", "write", "admin"}
+          result := {
+              "name": user.name,
+              "permission_role": user.permissions.role
+          }
+      }
+    expected_kql: |
+      users
+      | where permissions.role in (pack_array("read", "write", "admin"))
+      | project name, permission_role = permissions.role

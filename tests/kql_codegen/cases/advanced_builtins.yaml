@@ -1,0 +1,511 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# KQL code generation tests for advanced builtin functions
+
+cases:
+  # ========================
+  # ARRAY FUNCTIONS
+  # ========================
+  - note: array-concat-function
+    rego: |
+      package test
+      
+      combined_arrays contains result if {
+          some pair in data.array_pairs
+          result := {
+              "name": pair.name,
+              "arr1": pair.arr1,
+              "arr2": pair.arr2,
+              "combined": array.concat(pair.arr1, pair.arr2)
+          }
+      }
+    expected_kql: |
+      array_pairs
+      | project name, arr1, arr2, combined = array_concat(arr1, arr2)
+    test_kql: |
+      // Test with sample data
+      let array_pairs = datatable(name:string, arr1:dynamic, arr2:dynamic) [
+        "pair1", dynamic([1, 2]), dynamic([3, 4]),
+        "pair2", dynamic(["a", "b"]), dynamic(["c", "d"])
+      ];
+      array_pairs
+      | project name, arr1, arr2, combined = array_concat(arr1, arr2)
+
+  - note: array-reverse-function
+    rego: |
+      package test
+      
+      reversed_items contains result if {
+          some list in data.lists
+          result := {
+              "name": list.name,
+              "items": list.items,
+              "reversed": array.reverse(list.items)
+          }
+      }
+    expected_kql: |
+      lists
+      | project name, items, reversed = array_reverse(items)
+    test_kql: |
+      // Test with sample data
+      let lists = datatable(name:string, items:dynamic) [
+        "list1", dynamic([1, 2, 3, 4]),
+        "list2", dynamic(["a", "b", "c"])
+      ];
+      lists 
+      | project name, items, reversed = array_reverse(items)
+
+  - note: array-slice-function
+    rego: |
+      package test
+      
+      sliced_data contains result if {
+          some arr in data.arrays
+          result := {
+              "name": arr.name,
+              "data": arr.data,
+              "slice": array.slice(arr.data, 1, 5)
+          }
+      }
+    expected_kql: |
+      arrays
+      | project name, data, slice = array_slice(data, 1, 4)
+    test_kql: |
+      // Test with sample data
+      let arrays = datatable(name:string, data:dynamic) [
+        "array1", dynamic([1, 2, 3, 4, 5, 6, 7]),
+        "array2", dynamic(["a", "b", "c", "d", "e", "f"])
+      ];
+      arrays 
+      | project name, data, slice = array_slice(data, 1, 4)
+
+  - note: array-length-function
+    rego: |
+      package test
+      
+      valid_arrays contains result if {
+          some arr in data.arrays
+          array.length(arr.items) > 0
+          result := {
+              "name": arr.name,
+              "items": arr.items,
+              "length": array.length(arr.items)
+          }
+      }
+    expected_kql: |
+      arrays
+      | where array_length(items) > 0
+      | project name, items, length = array_length(items)
+    test_kql: |
+      // Test with sample data
+      let arrays = datatable(name:string, items:dynamic) [
+        "array1", dynamic([1, 2, 3]),
+        "array2", dynamic([]),
+        "array3", dynamic(["a", "b"])
+      ];
+      arrays 
+      | where array_length(items) > 0
+      | project name, items, length = array_length(items)
+
+  - note: sort-function
+    rego: |
+      package test
+      
+      sorted_lists contains result if {
+          some list in data.lists
+          result := {
+              "name": list.name,
+              "values": list.values,
+              "sorted": sort(list.values)
+          }
+      }
+    expected_kql: |
+      lists
+      | project name, values, sorted = array_sort_asc(values)
+    test_kql: |
+      // Test with sample data
+      let lists = datatable(name:string, values:dynamic) [
+        "list1", dynamic([3, 1, 4, 1, 5]),
+        "list2", dynamic(["c", "a", "b"])
+      ];
+      lists 
+      | project name, values, sorted = array_sort_asc(values)
+
+  # ========================
+  # STRING FUNCTIONS
+  # ========================
+  - note: strings-reverse-function
+    rego: |
+      package test
+      
+      palindrome_check contains result if {
+          some text in data.texts
+          strings.reverse(text.value) == text.value
+          result := {
+              "name": text.name,
+              "value": text.value,
+              "reversed": strings.reverse(text.value)
+          }
+      }
+    expected_kql: |
+      texts
+      | where reverse(value) == value
+      | project name, value, reversed = reverse(value)
+    test_kql: |
+      // Test with sample data
+      let texts = datatable(name:string, value:string) [
+        "text1", "racecar",
+        "text2", "hello",
+        "text3", "madam"
+      ];
+      texts 
+      | where reverse(value) == value
+      | project name, value, reversed = reverse(value)
+
+  - note: trim-functions
+    rego: |
+      package test
+      
+      cleaned_strings contains result if {
+          some str in data.strings
+          trim_left(str.value, " ") != str.value
+          result := {
+              "name": str.name,
+              "value": str.value,
+              "trimmed": trim_left(str.value, " ")
+          }
+      }
+    expected_kql: |
+      strings
+      | where trim_start(value, " ") != value
+      | project name, value, trimmed = trim_start(value, " ")
+    test_kql: |
+      // Test with sample data
+      let strings = datatable(name:string, value:string) [
+        "string1", "  hello",
+        "string2", "world",
+        "string3", " test "
+      ];
+      strings 
+      | where trim_start(value, " ") != value
+      | project name, value, trimmed = trim_start(value, " ")
+
+  - note: regex-match-function
+    rego: |
+      package test
+      
+      email_patterns contains result if {
+          some email in data.emails
+          regex.match("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", email.address)
+          result := {
+              "name": email.name,
+              "address": email.address,
+              "is_valid": regex.match("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", email.address)
+          }
+      }
+    expected_kql: |
+      emails
+      | where address matches regex "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+      | project name, address, is_valid = address matches regex "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+    test_kql: |
+      // Test with sample data
+      let emails = datatable(name:string, address:string) [
+        "user1", "alice@example.com",
+        "user2", "invalid-email",
+        "user3", "bob@test.org"
+      ];
+      emails 
+      | where address matches regex "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+      | project name, address, is_valid = address matches regex "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+
+  # ========================
+  # TYPE CONVERSION FUNCTIONS
+  # ========================
+  - note: to-number-function
+    rego: |
+      package test
+      
+      numeric_values contains result if {
+          some val in data.values
+          to_number(val.string_value) > 100
+          result := {
+              "name": val.name,
+              "string_value": val.string_value,
+              "numeric_value": to_number(val.string_value)
+          }
+      }
+    expected_kql: |
+      values
+      | where todouble(string_value) > 100
+      | project name, string_value, numeric_value = todouble(string_value)
+    test_kql: |
+      // Test with sample data
+      let values = datatable(name:string, string_value:string) [
+        "val1", "123",
+        "val2", "50",
+        "val3", "200"
+      ];
+      values 
+      | where todouble(string_value) > 100
+      | project name, string_value, numeric_value = todouble(string_value)
+
+  - note: format-int-function
+    rego: |
+      package test
+      
+      formatted_numbers contains result if {
+          some num in data.numbers
+          format_int(num.value, 10)
+          result := {
+              "name": num.name,
+              "value": num.value,
+              "formatted": format_int(num.value, 10)
+          }
+      }
+    expected_kql: |
+      numbers
+      | where isnotnull(tostring(value))
+      | project name, value, formatted = tostring(value)
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(name:string, value:int) [
+        "num1", 123,
+        "num2", 456,
+        "num3", 789
+      ];
+      numbers 
+      | where isnotnull(tostring(value))
+      | project name, value, formatted = tostring(value)
+
+  # ========================
+  # TYPE CHECKING FUNCTIONS
+  # ========================
+  - note: is-null-function
+    rego: |
+      package test
+      
+      null_fields contains result if {
+          some field in data.fields
+          is_null(field.optional_value)
+          result := {
+              "name": field.name,
+              "optional_value": field.optional_value,
+              "is_null": is_null(field.optional_value)
+          }
+      }
+    expected_kql: |
+      fields
+      | where isnull(optional_value)
+      | project name, optional_value, is_null = isnull(optional_value)
+    test_kql: |
+      // Test with sample data
+      let fields = datatable(name:string, optional_value:string) [
+        "field1", "value1",
+        "field2", "",
+        "field3", "value3"
+      ];
+      fields 
+      | where isnull(optional_value)
+      | project name, optional_value, is_null = isnull(optional_value)
+
+  # ========================
+  # ENCODING FUNCTIONS
+  # ========================
+  - note: base64-encode-function
+    rego: |
+      package test
+      
+      encoded_data contains result if {
+          some data in data.raw_data
+          base64.encode(data.content)
+          result := {
+              "name": data.name,
+              "content": data.content,
+              "encoded": base64.encode(data.content)
+          }
+      }
+    expected_kql: |
+      raw_data
+      | where isnotnull(base64_encode_tostring(content))
+      | project name, content, encoded = base64_encode_tostring(content)
+    test_kql: |
+      // Test with sample data
+      let raw_data = datatable(name:string, content:string) [
+        "data1", "hello world",
+        "data2", "test content",
+        "data3", "binary data"
+      ];
+      raw_data 
+      | where isnotnull(base64_encode_tostring(content))
+      | project name, content, encoded = base64_encode_tostring(content)
+
+  - note: base64-decode-function
+    rego: |
+      package test
+      
+      decoded_data contains result if {
+          some data in data.encoded_data
+          base64.decode(data.encoded_content)
+          result := {
+              "name": data.name,
+              "encoded_content": data.encoded_content,
+              "decoded": base64.decode(data.encoded_content)
+          }
+      }
+    expected_kql: |
+      encoded_data
+      | where isnotnull(base64_decode_tostring(encoded_content))
+      | project name, encoded_content, decoded = base64_decode_tostring(encoded_content)
+    test_kql: |
+      // Test with sample data
+      let encoded_data = datatable(name:string, encoded_content:string) [
+        "data1", "aGVsbG8gd29ybGQ=",
+        "data2", "dGVzdCBjb250ZW50",
+        "data3", "YmluYXJ5IGRhdGE="
+      ];
+      encoded_data 
+      | where isnotnull(base64_decode_tostring(encoded_content))
+      | project name, encoded_content, decoded = base64_decode_tostring(encoded_content)
+
+  # ========================
+  # MATH FUNCTIONS
+  # ========================
+  - note: mathematical-pow-function
+    rego: |
+      package test
+      
+      power_calculations contains result if {
+          some calc in data.calculations
+          calc.base >= 0
+          result := {
+              "base": calc.base,
+              "exponent": calc.exponent,
+              "power": round(pow(calc.base, calc.exponent))
+          }
+      }
+    expected_kql: |
+      calculations
+      | where base >= 0
+      | project base, exponent, power = round(pow(base, exponent))
+    test_kql: |
+      // Test with sample data
+      let calculations = datatable(base:real, exponent:real) [
+        2, 3,
+        4, 2,
+        5, 0,
+        10, 2
+      ];
+      calculations 
+      | where base >= 0
+      | project base, exponent, power = round(pow(base, exponent))
+
+  - note: mathematical-sqrt-function
+    rego: |
+      package test
+      
+      square_roots contains result if {
+          some num in data.numbers
+          num.value >= 0
+          result := {
+              "value": num.value,
+              "sqrt": round(sqrt(num.value), 2)
+          }
+      }
+    expected_kql: |
+      numbers
+      | where value >= 0
+      | project value, sqrt = round(sqrt(value), 2)
+    test_kql: |
+      // Test with sample data
+      let numbers = datatable(value:real) [
+        4,
+        9,
+        16,
+        25,
+        100
+      ];
+      numbers 
+      | where value >= 0
+      | project value, sqrt = round(sqrt(value), 2)
+
+  - note: trigonometric-functions
+    rego: |
+      package test
+      
+      trig_calculations contains result if {
+          some angle in data.angles
+          sin(angle.radians) > 0.5
+          result := {
+              "name": angle.name,
+              "radians": angle.radians,
+              "sin_value": sin(angle.radians)
+          }
+      }
+    expected_kql: |
+      angles
+      | where sin(radians) > 0.5
+      | project name, radians, sin_value = sin(radians)
+    test_kql: |
+      // Test with sample data
+      let angles = datatable(name:string, radians:double) [
+        "angle1", 0.5236,  // 30 degrees
+        "angle2", 1.0472,  // 60 degrees
+        "angle3", 1.5708   // 90 degrees
+      ];
+      angles 
+      | where sin(radians) > 0.5
+      | project name, radians, sin_value = sin(radians)
+
+  # ========================
+  # CONDITIONAL FUNCTIONS
+  # ========================
+  # NOTE: iff is NOT a valid Rego builtin function - disabled test
+  # - note: iff-function
+  #   rego: |
+  #     package test
+  #     
+  #     conditional_values contains val if {
+  #         some val in data.values
+  #         iff(val.is_positive, val.amount, 0) > 50
+  #     }
+  #   default_table: values
+  #   expected_kql: |
+  #     values
+  #     | where iff(is_positive, amount, 0) > 50
+
+  # ========================
+  # COMPLEX COMBINATIONS
+  # ========================
+  - note: complex-builtin-combination
+    rego: |
+      package test
+      
+      complex_analysis contains result if {
+          some user in data.users
+          count(user.tags) > 0
+          user.age >= 18
+          result := {
+              "name": user.name,
+              "age": user.age,
+              "tag_count": count(user.tags),
+              "first_tag": user.tags[0],
+              "name_length": count(user.name),
+              "is_adult": user.age >= 18
+          }
+      }
+    expected_kql: |
+      users
+      | where array_length(tags) > 0 and age >= 18
+      | project name, age, tag_count = array_length(tags), first_tag = tags[0], name_length = array_length(name), is_adult = age >= 18
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, age:int, tags:dynamic) [
+        "Alice", 25, dynamic(["developer", "python"]),
+        "Bob", 30, dynamic(["manager", "java", "scrum"]),
+        "Carol", 17, dynamic(["student"]),
+        "Dave", 28, dynamic([])
+      ];
+      users 
+      | where array_length(tags) > 0 and age >= 18
+      | project name, age, tag_count = array_length(tags), first_tag = tags[0], name_length = strlen(name), is_adult = (age >= 18)

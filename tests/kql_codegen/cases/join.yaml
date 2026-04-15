@@ -1,0 +1,375 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# Join functionality tests for multi-table relationships
+
+cases:
+  - note: simple-two-table-join
+    rego: |
+      package test
+      
+      # Simple join: Users -> Roles
+      user_roles contains result if {
+        some user in data.Users
+        some role in data.Roles
+        user.role_id == role.id
+        t := role.age + 10
+        result := {
+          "final_user_name": user.name,
+          "role_name": role.name,
+          "age": user.age,
+          "rage": t
+        }
+      }
+    expected_kql: |
+      Users
+      | project user_age = age, user_name = name, user_role_id = role_id
+      | join kind=inner (
+          Roles
+          | project role_age = age, role_id = id, role_name = name
+        )
+        on $left.user_role_id == $right.role_id
+      | extend t = role_age + 10
+      | project final_user_name = user_name, role_name, age = user_age, rage = t
+    test_kql: |
+      // Test with sample data
+      let Users = datatable(id:int, name:string, role_id:int, age:int) [
+        1, "alice", 100, 25,
+        2, "bob", 101, 30,
+        3, "charlie", 100, 28
+      ];
+      let Roles = datatable(id:int, name:string, age:int) [
+        100, "admin", 35,
+        101, "user", 25,
+        102, "guest", 20
+      ];
+      Users
+      | project user_age = age, user_name = name, user_role_id = role_id
+      | join kind=inner (
+          Roles
+          | project role_age = age, role_id = id, role_name = name
+        )
+        on $left.user_role_id == $right.role_id
+      | extend t = role_age + 10
+      | project final_user_name = user_name, role_name, age = user_age, rage = t
+
+  - note: three-table-join-chain
+    rego: |
+      package test
+      
+      # Three table join: Users -> Departments -> Companies
+      user_companies contains result if {
+        some user in data.Users
+        some dept in data.Departments
+        some company in data.Companies
+        user.dept_id == dept.id
+        dept.company_id == company.id
+        
+        result := {
+          "user_name": user.name,
+          "department": dept.name,
+          "company": company.name
+        }
+      }
+    expected_kql: |
+      Users
+      | project user_dept_id = dept_id, user_name = name
+      | join kind=inner (
+          Departments
+          | project dept_company_id = company_id, dept_id = id, dept_name = name
+        )
+        on $left.user_dept_id == $right.dept_id
+      | join kind=inner (
+          Companies
+          | project company_id = id, company_name = name
+        )
+        on $left.dept_company_id == $right.company_id
+      | project user_name, department = dept_name, company = company_name
+    test_kql: |
+      // Test with sample data
+      let Users = datatable(id:int, name:string, dept_id:int) [
+        1, "alice", 10,
+        2, "bob", 20,
+        3, "charlie", 10
+      ];
+      let Departments = datatable(id:int, name:string, company_id:int) [
+        10, "Engineering", 1,
+        20, "Marketing", 2,
+        30, "Sales", 1
+      ];
+      let Companies = datatable(id:int, name:string) [
+        1, "TechCorp",
+        2, "AdCorp"
+      ];
+      Users
+      | project user_dept_id = dept_id, user_name = name
+      | join kind=inner (
+          Departments
+          | project dept_company_id = company_id, dept_id = id, dept_name = name
+        )
+        on $left.user_dept_id == $right.dept_id
+      | join kind=inner (
+          Companies
+          | project company_id = id, company_name = name
+        )
+        on $left.dept_company_id == $right.company_id
+      | project user_name, department = dept_name, company = company_name
+
+  - note: join-with-filters
+    rego: |
+      package test
+      
+      # Join with filters on both tables
+      active_user_permissions contains result if {
+        some user in data.Users
+        user.active == true
+        some permission in data.Permissions
+        permission.enabled == true
+        user.id == permission.user_id
+        
+        result := {
+          "user_name": user.name,
+          "permission": permission.name
+        }
+      }
+    expected_kql: |
+      Users
+      | where active == true
+      | project user_active = active, user_id = id, user_name = name
+      | join kind=inner (
+          Permissions
+          | where enabled == true
+          | project permission_enabled = enabled, permission_name = name, permission_user_id = user_id
+        )
+        on $left.user_id == $right.permission_user_id
+      | project user_name, permission = permission_name
+    test_kql: |
+      // Test with sample data
+      let Users = datatable(id:int, name:string, active:bool) [
+        1, "alice", true,
+        2, "bob", false,
+        3, "charlie", true
+      ];
+      let Permissions = datatable(id:int, name:string, user_id:int, enabled:bool) [
+        100, "read", 1, true,
+        101, "write", 1, false,
+        102, "admin", 3, true,
+        103, "delete", 2, true
+      ];
+      Users
+      | where active == true
+      | project user_active = active, user_id = id, user_name = name
+      | join kind=inner (
+          Permissions
+          | where enabled == true
+          | project permission_enabled = enabled, permission_name = name, permission_user_id = user_id
+        )
+        on $left.user_id == $right.permission_user_id
+      | project user_name, permission = permission_name
+
+  - note: self-join-pattern
+    rego: |
+      package test
+      
+      # Self-join: Employees and their managers
+      employee_managers contains result if {
+        some employee in data.Employees
+        some manager in data.Employees
+        employee.manager_id == manager.id
+        employee.id != manager.id  # Avoid self-reference
+        
+        result := {
+          "employee_name": employee.name,
+          "manager_name": manager.name
+        }
+      }
+    expected_kql: |
+      Employees
+      | project employee_id = id, employee_manager_id = manager_id, employee_name = name
+      | join kind=inner (
+          Employees
+          | project manager_id = id, manager_name = name
+        )
+        on $left.employee_manager_id == $right.manager_id
+      | where employee_id != manager_id
+      | project employee_name, manager_name
+    test_kql: |
+      // Test with sample data
+      let Employees = datatable(id:int, name:string, manager_id:int) [
+        1, "alice", 3,
+        2, "bob", 3,
+        3, "charlie", 4,
+        4, "diana", 0
+      ];
+      Employees
+      | project employee_id = id, employee_manager_id = manager_id, employee_name = name
+      | join kind=inner (
+          Employees
+          | project manager_id = id, manager_name = name
+        )
+        on $left.employee_manager_id == $right.manager_id
+      | where employee_id != manager_id
+      | project employee_name, manager_name
+
+  - note: join-with-null-handling
+    rego: |
+      package test
+      
+      # Join with null checks
+      valid_assignments contains result if {
+        some user in data.Users
+        some task in data.Tasks
+        user.id == task.assigned_user_id
+        task.assigned_user_id != null
+        
+        result := {
+          "user_name": user.name,
+          "task_title": task.title
+        }
+      }
+    expected_kql: |
+      Users
+      | project user_id = id, user_name = name
+      | join kind=inner (
+          Tasks
+          | where isnotnull(assigned_user_id)
+          | project task_assigned_user_id = assigned_user_id, task_title = title
+        )
+        on $left.user_id == $right.task_assigned_user_id
+      | project user_name, task_title
+    test_kql: |
+      // Test with sample data
+      let Users = datatable(id:int, name:string) [
+        1, "alice",
+        2, "bob",
+        3, "charlie"
+      ];
+      let Tasks = datatable(id:int, title:string, assigned_user_id:int) [
+        100, "Task 1", 1,
+        101, "Task 2", int(null),
+        102, "Task 3", 2,
+        103, "Task 4", int(null)
+      ];
+      Users
+      | project user_id = id, user_name = name
+      | join kind=inner (
+          Tasks
+          | where isnotnull(assigned_user_id)
+          | project task_assigned_user_id = assigned_user_id, task_title = title
+        )
+        on $left.user_id == $right.task_assigned_user_id
+      | project user_name, task_title
+
+  - note: complex-four-table-enterprise-access-control
+    rego: |
+      package enterprise_access
+      
+      import rego.v1
+      
+      authorized_actions contains result if {
+          some user in data.users
+          some role_assignment in data.user_roles
+          some role in data.roles 
+          some permission in data.role_permissions
+          
+          # Join conditions
+          role_assignment.user_id == user.id
+          role_assignment.role_id == role.id
+          permission.role_id == role.id
+          
+          # Business logic filters
+          user.status == "active"
+          user.department in {"engineering", "security", "finance"}
+          role_assignment.expires_at > "2024-08-28T00:00:00Z"
+          role.is_enabled == true
+          permission.resource_type in {"database", "api", "admin_panel"}
+          
+          # Complex computed conditions
+          contains(lower(user.email), "@company.com")
+          startswith(permission.action, "read_")
+          abs(user.last_login_days_ago) <= 30
+          
+          result := {
+              "user_id": user.id,
+              "user_name": user.name,
+              "user_email": user.email,
+              "department": user.department,
+              "role_name": role.name,
+              "permission_resource": permission.resource_type,
+              "permission_action": permission.action,
+              "assignment_expires": role_assignment.expires_at,
+              "computed_risk_score": user.last_login_days_ago * 0.1 + role.privilege_level * 2.0
+          }
+      }
+    expected_kql: |
+      users
+      | where status == "active" and department in (pack_array("engineering", "security", "finance")) and tolower(email) contains "@company.com" and abs(last_login_days_ago) <= 30
+      | project user_department = department, user_email = email, user_id = id, user_last_login_days_ago = last_login_days_ago, user_name = name, user_status = status
+      | join kind=inner (
+          user_roles
+          | where expires_at > "2024-08-28T00:00:00Z"
+          | project role_assignment_expires_at = expires_at, role_assignment_role_id = role_id, role_assignment_user_id = user_id
+        )
+        on $left.user_id == $right.role_assignment_user_id
+      | join kind=inner (
+          roles
+          | where is_enabled == true
+          | project role_id = id, role_is_enabled = is_enabled, role_name = name, role_privilege_level = privilege_level
+        )
+        on $left.role_assignment_role_id == $right.role_id
+      | join kind=inner (
+          role_permissions
+          | where resource_type3 in (pack_array("database", "api", "admin_panel"))
+          | where action3 startswith "read_"
+          | project permission_action = action, permission_resource_type = resource_type, permission_role_id = role_id
+        )
+        on $left.role_id == $right.permission_role_id
+      | project user_id, user_name, user_email, department = user_department, role_name, permission_resource = permission_resource_type, permission_action, assignment_expires = role_assignment_expires_at, computed_risk_score = user_last_login_days_ago * 0.1 + role_privilege_level * 2
+    test_kql: |
+      // Test with comprehensive sample data for 4-table join
+      let users = datatable(id:int, name:string, email:string, department:string, status:string, last_login_days_ago:int) [
+        1, "alice", "alice@company.com", "engineering", "active", 5,
+        2, "bob", "bob@external.com", "marketing", "active", 45,
+        3, "charlie", "charlie@company.com", "security", "active", 2,
+        4, "diana", "diana@company.com", "finance", "inactive", 10
+      ];
+      let user_roles = datatable(user_id:int, role_id:int, expires_at:datetime) [
+        1, 101, datetime("2024-12-31T23:59:59Z"),
+        2, 102, datetime("2024-07-01T00:00:00Z"),
+        3, 103, datetime("2024-12-31T23:59:59Z"),
+        4, 101, datetime("2024-12-31T23:59:59Z")
+      ];
+      let roles = datatable(id:int, name:string, is_enabled:bool, privilege_level:int) [
+        101, "senior_engineer", true, 3,
+        102, "marketing_lead", true, 2,
+        103, "security_admin", true, 5
+      ];
+      let role_permissions = datatable(role_id:int, resource_type:string, action:string) [
+        101, "database", "read_data",
+        101, "api", "read_logs",
+        102, "admin_panel", "read_users",
+        103, "database", "read_sensitive",
+        103, "api", "read_security_logs"
+      ];
+      users
+      | project user_department = department, user_email = email, user_id = id, user_last_login_days_ago = last_login_days_ago, user_name = name, user_status = status
+      | join kind=inner (
+          user_roles
+          | where expires_at > datetime("2024-08-28T00:00:00Z")
+          | project role_assignment_expires_at = expires_at, role_assignment_role_id = role_id, role_assignment_user_id = user_id
+        )
+        on $left.user_id == $right.role_assignment_user_id
+      | join kind=inner (
+          roles
+          | where is_enabled == true
+          | project role_id = id, role_is_enabled = is_enabled, role_name = name, role_privilege_level = privilege_level
+        )
+        on $left.role_assignment_role_id == $right.role_id
+      | join kind=inner (
+          role_permissions
+          | where resource_type in ("database", "api", "admin_panel") and action startswith "read_"
+          | project permission_action = action, permission_resource_type = resource_type, permission_role_id = role_id
+        )
+        on $left.role_id == $right.permission_role_id
+      | where user_status == "active" and user_department in ("engineering", "security", "finance") and tolower(user_email) contains "@company.com" and abs(user_last_login_days_ago) <= 30
+      | project user_id, user_name, user_email, department = user_department, role_name, permission_resource = permission_resource_type, permission_action, assignment_expires = role_assignment_expires_at, computed_risk_score = user_last_login_days_ago * 0.1 + role_privilege_level * 2.0

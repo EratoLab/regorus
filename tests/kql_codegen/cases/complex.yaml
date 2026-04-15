@@ -1,0 +1,234 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+# KQL code generation tests for complex expressions and edge cases
+
+cases:
+  - note: multiple-conditions-with-operators
+    rego: |
+      package test
+      
+      qualified_employees contains result if {
+          some user in data.employees
+          user.role in {"admin", "manager"}
+          user.experience_years >= 5
+          user.department != "contractor"
+          user.salary > 50000
+          user.clearance_level == "secret"
+          result := {
+              "name": user.name,
+              "role": user.role,
+              "experience_years": user.experience_years,
+              "department": user.department,
+              "salary": user.salary,
+              "clearance_level": user.clearance_level
+          }
+      }
+    expected_kql: |
+      employees
+      | where role in (pack_array("admin", "manager")) and experience_years >= 5 and department != "contractor" and salary > 50000 and clearance_level == "secret"
+      | project name, role, experience_years, department, salary, clearance_level
+    test_kql: |
+      // Test with sample data
+      let employees = datatable(name:string, role:string, experience_years:int, department:string, salary:int, clearance_level:string) [
+        "alice", "admin", 7, "engineering", 75000, "secret",
+        "bob", "user", 3, "engineering", 45000, "public",
+        "charlie", "manager", 10, "security", 85000, "secret",
+        "diana", "admin", 2, "contractor", 60000, "secret"
+      ];
+      employees
+      | where role in (pack_array("admin", "manager")) and experience_years >= 5 and department != "contractor" and salary > 50000 and clearance_level == "secret"
+      | project name, role, experience_years, department, salary, clearance_level
+
+  - note: nested-field-access
+    rego: |
+      package test
+      
+      configured_users contains result if {
+          some user in data.users
+          user.profile.settings.notifications == true
+          user.account.status.active == true
+          result := {
+              "name": user.name,
+              "profile": user.profile,
+              "account": user.account
+          }
+      }
+    expected_kql: |
+      users
+      | where profile.settings.notifications == true and account.status.active == true
+      | project name, profile, account
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, profile:dynamic, account:dynamic) [
+        "alice", dynamic({"settings": {"notifications": true}}), dynamic({"status": {"active": true}}),
+        "bob", dynamic({"settings": {"notifications": false}}), dynamic({"status": {"active": true}}),
+        "charlie", dynamic({"settings": {"notifications": true}}), dynamic({"status": {"active": false}})
+      ];
+      users
+      | where profile.settings.notifications == true and account.status.active == true
+      | project name, profile, account
+
+  - note: comparison-operators
+    rego: |
+      package test
+      
+      filtered_events contains result if {
+          some event in data.events
+          event.timestamp >= start_time
+          event.timestamp <= end_time
+          event.severity_level < 5
+          event.retry_count != 0
+          result := {
+              "id": event.id,
+              "timestamp": event.timestamp,
+              "severity_level": event.severity_level,
+              "retry_count": event.retry_count
+          }
+      }
+    expected_kql: |
+      events
+      | where timestamp >= start_time and timestamp <= end_time and severity_level < 5 and retry_count != 0
+      | project id, timestamp, severity_level, retry_count
+    test_kql: |
+      // Test with sample data
+      let start_time = datetime(2023-01-01);
+      let end_time = datetime(2023-12-31);
+      let events = datatable(id:int, timestamp:datetime, severity_level:int, retry_count:int) [
+        1, datetime(2023-06-15), 3, 2,
+        2, datetime(2022-12-31), 4, 0,
+        3, datetime(2023-08-20), 6, 1,
+        4, datetime(2023-03-10), 2, 3
+      ];
+      events
+      | where timestamp >= start_time and timestamp <= end_time and severity_level < 5 and retry_count != 0
+      | project id, timestamp, severity_level, retry_count
+
+  - note: string-operations
+    rego: |
+      package test
+      
+      target_users contains result if {
+          some user in data.users
+          user.email == "admin@company.com"
+          user.username != "guest"
+          result := {
+              "name": user.name,
+              "email": user.email,
+              "username": user.username
+          }
+      }
+    expected_kql: |
+      users
+      | where email == "admin@company.com" and username != "guest"
+      | project name, email, username
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, email:string, username:string) [
+        "alice", "admin@company.com", "alice_admin",
+        "bob", "bob@external.com", "bob_user",
+        "charlie", "admin@company.com", "guest",
+        "diana", "diana@company.com", "diana_user"
+      ];
+      users
+      | where email == "admin@company.com" and username != "guest"
+      | project name, email, username
+
+  - note: rule-with-complex-name
+    rego: |
+      package authorization.rules
+      
+      privileged_users contains result if {
+          some user in data.users
+          user.role == "admin"
+          user.mfa_enabled == true
+          result := {
+              "name": user.name,
+              "role": user.role,
+              "mfa_enabled": user.mfa_enabled
+          }
+      }
+    expected_kql: |
+      users
+      | where role == "admin" and mfa_enabled == true
+      | project name, role, mfa_enabled
+    test_kql: |
+      // Test with sample data
+      let users = datatable(name:string, role:string, mfa_enabled:bool) [
+        "alice", "admin", true,
+        "bob", "user", true,
+        "charlie", "admin", false,
+        "diana", "manager", true
+      ];
+      users
+      | where role == "admin" and mfa_enabled == true
+      | project name, role, mfa_enabled
+
+  - note: boolean-logic-combinations
+    rego: |
+      package test
+      
+      active_users contains result if {
+          some user in data.users
+          user.status == "active"
+          user.last_login >= cutoff_date
+          user.permissions.read == true
+          user.permissions.write == true
+          result := {
+              "username": user.username,
+              "status": user.status,
+              "last_login": user.last_login,
+              "permissions": user.permissions
+          }
+      }
+    expected_kql: |
+      users
+      | where status == "active" and last_login >= cutoff_date and permissions.read == true and permissions.write == true
+      | project username, status, last_login, permissions
+    test_kql: |
+      // Test with sample data
+      let cutoff_date = datetime(2023-01-01);
+      let users = datatable(username:string, status:string, last_login:datetime, permissions:dynamic) [
+        "alice", "active", datetime(2023-06-15), dynamic({"read": true, "write": true}),
+        "bob", "inactive", datetime(2023-05-10), dynamic({"read": true, "write": false}),
+        "charlie", "active", datetime(2022-12-20), dynamic({"read": true, "write": true}),
+        "diana", "active", datetime(2023-08-01), dynamic({"read": false, "write": true})
+      ];
+      users
+      | where status == "active" and last_login >= cutoff_date and permissions.read == true and permissions.write == true
+      | project username, status, last_login, permissions
+
+  - note: numeric-ranges-and-calculations
+    rego: |
+      package test
+      
+      high_value_transactions contains result if {
+          some txn in data.transactions
+          txn.amount >= 1000
+          txn.amount <= 50000
+          txn.fee_percentage < 5
+          txn.status == "completed"
+          result := {
+              "transaction_id": txn.id,
+              "amount": txn.amount,
+              "fee_percentage": txn.fee_percentage,
+              "fee_amount": txn.amount * txn.fee_percentage / 100,
+              "net_amount": txn.amount - (txn.amount * txn.fee_percentage / 100)
+          }
+      }
+    expected_kql: |
+      transactions
+      | where amount >= 1000 and amount <= 50000 and fee_percentage < 5 and status == "completed"
+      | project transaction_id = id, amount, fee_percentage, fee_amount = amount * fee_percentage / 100, net_amount = amount - amount * fee_percentage / 100
+    test_kql: |
+      // Test with sample data
+      let transactions = datatable(id:string, amount:real, fee_percentage:real, status:string) [
+        "txn1", 2500.0, 2.5, "completed",
+        "txn2", 750.0, 3.0, "completed",
+        "txn3", 10000.0, 1.8, "completed",
+        "txn4", 15000.0, 6.0, "completed",
+        "txn5", 5000.0, 4.2, "pending"
+      ];
+      transactions
+      | where amount >= 1000 and amount <= 50000 and fee_percentage < 5.0 and status == "completed"
+      | project transaction_id = id, amount, fee_percentage, fee_amount = amount * fee_percentage / 100, net_amount = amount - amount * fee_percentage / 100
