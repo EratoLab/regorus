@@ -9,6 +9,7 @@
 use anyhow::{bail, Result};
 use regorus::unstable::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use test_generator::test_resources;
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
@@ -21,11 +22,58 @@ struct SqlTestCase {
     expected_sql: Option<String>,
     /// Expected error message (if translation should fail)
     error: Option<String>,
+    /// Bindings for the global `input` document
+    input: Option<HashMap<String, serde_yaml::Value>>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug)]
 struct SqlYamlTest {
     cases: Vec<SqlTestCase>,
+}
+
+fn yaml_value_to_sql_literal(value: &serde_yaml::Value) -> Result<SqlLiteral> {
+    match value {
+        serde_yaml::Value::Null => Ok(SqlLiteral::Null),
+        serde_yaml::Value::Bool(b) => Ok(SqlLiteral::Boolean(*b)),
+        serde_yaml::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(SqlLiteral::Integer(i))
+            } else if let Some(f) = n.as_f64() {
+                Ok(SqlLiteral::Float(f))
+            } else {
+                bail!("unsupported YAML number in SQL input binding: {n}")
+            }
+        }
+        serde_yaml::Value::String(s) => Ok(SqlLiteral::String(s.clone())),
+        _ => bail!("SQL input bindings only support scalar literals or {{ variable: ... }}"),
+    }
+}
+
+fn convert_input_bindings(
+    input: &HashMap<String, serde_yaml::Value>,
+) -> Result<HashMap<String, SqlInputValue>> {
+    input.iter()
+        .map(|(key, binding)| {
+            let value = match binding {
+                serde_yaml::Value::Mapping(map) => {
+                    let variable_key = serde_yaml::Value::String("variable".to_string());
+                    if map.len() == 1 && map.contains_key(&variable_key) {
+                        let variable = map
+                            .get(&variable_key)
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| anyhow::anyhow!("`variable` binding must be a string"))?;
+                        SqlInputValue::Variable(variable.to_string())
+                    } else {
+                        bail!(
+                            "SQL input bindings only support scalar literals or {{ variable: ... }}"
+                        );
+                    }
+                }
+                other => SqlInputValue::Literal(yaml_value_to_sql_literal(other)?),
+            };
+            Ok((key.clone(), value))
+        })
+        .collect()
 }
 
 fn normalize_sql(sql: &str) -> String {
@@ -63,10 +111,6 @@ fn sql_test_impl(file: &str) -> Result<()> {
 
         match parser.parse_database_module() {
             Ok(module) => {
-                if let Some(expected_error) = &case.error {
-                    bail!("Expected error `{}` but parsing succeeded.", expected_error);
-                }
-
                 // Test that we have at least one rule to translate
                 if module.policy.is_empty() {
                     if case.expected_sql.is_some() {
@@ -81,6 +125,9 @@ fn sql_test_impl(file: &str) -> Result<()> {
                 let default_table = "events"; // Default table name
                 let mut translator =
                     RegoToSqlIrTranslator::new(None).with_default_table(default_table.to_string());
+                if let Some(input) = &case.input {
+                    translator = translator.with_input_bindings(convert_input_bindings(input)?);
+                }
 
                 match translator.translate_rule(rule) {
                     Ok(sql_ir) => {
@@ -168,7 +215,6 @@ fn run_sql_tests(path: &str) {
 #[cfg(test)]
 mod direct_sql_tests {
     use super::*;
-    use regorus::unstable::*;
 
     #[test]
     fn test_simple_select_generation() {

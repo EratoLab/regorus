@@ -14,18 +14,6 @@ use crate::value::Value;
 
 use crate::alloc::{boxed::Box, format, string::String, string::ToString, vec, vec::Vec};
 use anyhow::{bail, Result};
-use std::collections::{BTreeSet, HashMap, HashSet};
-
-#[cfg(feature = "std")]
-use std::println;
-
-#[cfg(not(feature = "std"))]
-macro_rules! println {
-    ($($arg:tt)*) => {
-        // No-op for no_std environments
-    };
-}
-
 /// Translator from Rego to SQL IR
 #[derive(Debug)]
 pub struct RegoToSqlIrTranslator {
@@ -43,6 +31,8 @@ pub struct RegoToSqlIrTranslator {
     variable_assignments: std::collections::HashMap<String, SqlExpression>,
     /// Columns known to be arrays (identified via numeric RefBrack indexing in pre-scan)
     array_columns: std::collections::HashSet<String>,
+    /// Bound values for global `input` paths
+    input_bindings: std::collections::HashMap<String, SqlInputValue>,
 }
 
 impl RegoToSqlIrTranslator {
@@ -55,11 +45,25 @@ impl RegoToSqlIrTranslator {
             conditions: Vec::new(),
             variable_assignments: std::collections::HashMap::new(),
             array_columns: std::collections::HashSet::new(),
+            input_bindings: std::collections::HashMap::new(),
         }
     }
 
     pub fn with_default_table(mut self, table: String) -> Self {
         self.default_table = Some(table);
+        self
+    }
+
+    pub fn with_input_bindings(
+        mut self,
+        bindings: std::collections::HashMap<String, SqlInputValue>,
+    ) -> Self {
+        self.input_bindings = bindings;
+        self
+    }
+
+    pub fn with_input_binding(mut self, path: String, value: SqlInputValue) -> Self {
+        self.input_bindings.insert(path, value);
         self
     }
 
@@ -261,6 +265,10 @@ impl RegoToSqlIrTranslator {
     /// `column->'key1'->'key2'->>'lastKey'` using internal `json_extract` (→) and
     /// `json_extract_text` (->>) function names that the codegen renders correctly.
     fn translate_refdot_chain(&self, expr: &Expr) -> Result<SqlExpression> {
+        if let Some(path) = Self::extract_input_path(expr)? {
+            return self.resolve_input_path(&path);
+        }
+
         // Collect the base column expression and all field names in order.
         let (base, fields) = self.collect_refdot_parts(expr)?;
 
@@ -397,6 +405,64 @@ impl RegoToSqlIrTranslator {
             Expr::RefBrack { refr, .. } => Self::extract_last_field_name(refr),
             _ => None,
         }
+    }
+
+    fn extract_input_path(expr: &Expr) -> Result<Option<Vec<String>>> {
+        match expr {
+            Expr::Var { value, .. } => {
+                let var_name = value
+                    .as_string()
+                    .map_err(|_| anyhow::anyhow!("Invalid variable name"))?;
+                if var_name.as_ref() == "input" {
+                    Ok(Some(Vec::new()))
+                } else {
+                    Ok(None)
+                }
+            }
+            Expr::RefDot { refr, field, .. } => {
+                let Some(mut path) = Self::extract_input_path(refr)? else {
+                    return Ok(None);
+                };
+                let field_name = match &field.1 {
+                    Value::String(s) => s.to_string(),
+                    _ => bail!("Field name must be a string"),
+                };
+                path.push(field_name);
+                Ok(Some(path))
+            }
+            Expr::RefBrack { refr, index, .. } => {
+                let Some(mut path) = Self::extract_input_path(refr)? else {
+                    return Ok(None);
+                };
+                let field_name = match index.as_ref() {
+                    Expr::String { value, .. } => value
+                        .as_string()
+                        .map_err(|_| anyhow::anyhow!("Invalid input field name"))?
+                        .as_ref()
+                        .to_string(),
+                    _ => bail!("input indexing requires a string literal key"),
+                };
+                path.push(field_name);
+                Ok(Some(path))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn resolve_input_path(&self, path: &[String]) -> Result<SqlExpression> {
+        let key = path.join(".");
+        let Some(bound_value) = self.input_bindings.get(&key) else {
+            if key.is_empty() {
+                bail!("global `input` is not supported directly; bind a specific input path")
+            } else {
+                bail!("missing SQL input binding for `input.{}`", key)
+            }
+        };
+
+        Ok(match bound_value {
+            SqlInputValue::Literal(literal) => SqlExpression::Literal(literal.clone()),
+            SqlInputValue::Variable(name) => SqlExpression::InjectedVariable(name.clone()),
+        })
     }
 
     /// Extract a (potentially namespaced) function name from a call's `fcn` expression.
@@ -584,7 +650,7 @@ impl RegoToSqlIrTranslator {
     fn process_statement(
         &mut self,
         stmt: &LiteralStmt,
-        source_table: &mut String,
+        _source_table: &mut String,
         projections: &mut Vec<SqlColumn>,
     ) -> Result<()> {
         match &stmt.literal {
@@ -851,6 +917,9 @@ impl RegoToSqlIrTranslator {
                 let var_name = value
                     .as_string()
                     .map_err(|_| anyhow::anyhow!("Invalid variable name"))?;
+                if var_name.as_ref() == "input" {
+                    return self.resolve_input_path(&[]);
+                }
                 // Substitute intermediate variable bindings (e.g. `t := role.age + 10`)
                 if let Some(assigned) = self.variable_assignments.get(var_name.as_ref()) {
                     return Ok(assigned.clone());
@@ -1186,6 +1255,9 @@ impl RegoToSqlIrTranslator {
 
             // Array subscript: a[0] → a[1] (convert 0-based Rego → 1-based SQL/PostgreSQL)
             Expr::RefBrack { refr, index, .. } => {
+                if let Some(path) = Self::extract_input_path(expr)? {
+                    return self.resolve_input_path(&path);
+                }
                 let arr_expr = self.translate_expression_to_sql(refr)?;
                 let idx_expr = self.translate_expression_to_sql(index)?;
                 // Increment integer literal indices; emit expr+1 for non-literals.
@@ -1225,7 +1297,7 @@ impl RegoToSqlIrTranslator {
 
             // Object literals - for now, we handle these as structure projections
             // In a full implementation, this would generate JSON or structured types
-            Expr::Object { fields, .. } => {
+            Expr::Object { fields: _, .. } => {
                 // For SQL, object literals typically represent structured data
                 // We'll create a column reference that represents the object structure
                 bail!("Object literals in expressions are not yet supported for SQL translation");

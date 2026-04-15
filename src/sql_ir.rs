@@ -71,6 +71,8 @@ pub enum SqlExpression {
     Column(String),
     /// Literal value
     Literal(SqlLiteral),
+    /// Variable or placeholder injected verbatim into generated SQL
+    InjectedVariable(String),
     /// Binary operation
     Binary {
         op: SqlBinaryOp,
@@ -444,6 +446,10 @@ impl SqlExpression {
         SqlExpression::Column(name.to_string())
     }
 
+    pub fn injected_variable(name: &str) -> Self {
+        SqlExpression::InjectedVariable(name.to_string())
+    }
+
     pub fn string_literal(value: &str) -> Self {
         SqlExpression::Literal(SqlLiteral::String(value.to_string()))
     }
@@ -510,6 +516,13 @@ impl SqlExpression {
             not: false,
         }
     }
+}
+
+/// Value bound to a global `input` path during SQL translation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SqlInputValue {
+    Literal(SqlLiteral),
+    Variable(String),
 }
 
 /// Binary serialization/deserialization using bincode

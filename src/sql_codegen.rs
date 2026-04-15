@@ -307,6 +307,7 @@ impl SqlCodeGenerator {
                 }
             }
             SqlExpression::Literal(ref literal) => self.generate_literal(literal),
+            SqlExpression::InjectedVariable(ref name) => name.clone(),
             SqlExpression::Binary {
                 ref op,
                 ref left,

@@ -1,0 +1,75 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
+cases:
+  - note: input-string-literal-filter
+    rego: |
+      package test
+
+      tenant_users contains result if {
+          some user in data.users
+          user.tenant_id == input.tenant_id
+          result := { "name": user.name }
+      }
+    input:
+      tenant_id: tenant-a
+    expected_sql: |
+      SELECT name
+      FROM users
+      WHERE tenant_id = 'tenant-a'
+
+  - note: input-variable-placeholder-filter
+    rego: |
+      package test
+
+      filtered_users contains result if {
+          some user in data.users
+          user.tenant_id == input.tenant_id
+          user.active == input.active
+          result := {
+              "name": user.name,
+              "tenant_id": user.tenant_id
+          }
+      }
+    input:
+      tenant_id:
+        variable: :tenant_id
+      active:
+        variable: :is_active
+    expected_sql: |
+      SELECT name, tenant_id
+      FROM users
+      WHERE tenant_id = :tenant_id AND active = :is_active
+
+  - note: input-nested-path-and-literal-number
+    rego: |
+      package test
+
+      expensive_orders contains result if {
+          some order in data.orders
+          order.tenant_id == input.context.tenant_id
+          order.total >= input.min_total
+          result := {
+              "tenant_id": order.tenant_id,
+              "total": order.total
+          }
+      }
+    input:
+      context.tenant_id:
+        variable: $tenant_id
+      min_total: 100
+    expected_sql: |
+      SELECT tenant_id, total
+      FROM orders
+      WHERE tenant_id = $tenant_id AND total >= 100
+
+  - note: missing-input-binding
+    rego: |
+      package test
+
+      filtered_users contains result if {
+          some user in data.users
+          user.tenant_id == input.tenant_id
+          result := { "name": user.name }
+      }
+    error: "missing SQL input binding for `input.tenant_id`"
